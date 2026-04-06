@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+profiles/
+output/
+cache/
+error_logs/
+task_results/
+local_storage.json
+db.sqlite3
+.DS_Store
+.history/

@@ -1,0 +1,11 @@
+services:
+  mapo:
+    build: .
+    init: true
+    restart: "no"
+    shm_size: 800m
+    volumes:
+      - .:/app
+    ports:
+      - "3000:3000"
+      - "8000:8000"

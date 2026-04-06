@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+*.pyo
+.venv/
+venv/
+profiles/
+output/
+cache/
+error_logs/
+task_results/
+local_storage.json
+db.sqlite3
+.env
+.git/

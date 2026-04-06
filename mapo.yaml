@@ -1,0 +1,72 @@
+# Mapo Configuration
+# Copy this file and customize for your deployment.
+# Environment variables override these settings (see .env.example).
+
+# --- Proxy Configuration ---
+# proxy:
+#   enabled: false
+#   urls:
+#     - "http://user:pass@proxy1.example.com:8080"
+#     - "socks5://user:pass@proxy2.example.com:1080"
+#   rotation: round_robin   # round_robin, random, geo_match
+#   geo_match: false         # match proxy location to search region
+
+# --- Enrichment Provider ---
+# enrichment:
+#   provider: rapidapi       # rapidapi, hunter, apollo
+#   api_key: ""
+
+# --- Webhooks ---
+# webhooks:
+#   enabled: false
+#   urls:
+#     - "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+#     - "https://your-app.com/webhooks/mapo"
+#   retry_count: 3
+
+# --- Scheduler (Cron Jobs) ---
+# scheduler:
+#   enabled: false
+#   jobs:
+#     - name: "weekly_restaurants_nyc"
+#       query: "Restaurants in New York"
+#       cron: "0 8 * * 1"         # Every Monday at 8am
+#       max_results: 500
+#       output_target: csv         # csv, json, postgres, sheets, s3
+#       output_path: "./data/restaurants_nyc.csv"
+#
+#     - name: "daily_dentists_sf"
+#       query: "Dentists in San Francisco"
+#       cron: "0 6 * * *"         # Every day at 6am
+#       max_results: 200
+#       output_target: postgres
+
+# --- Output Targets ---
+# outputs:
+#   targets:
+#     - type: csv
+#       path: "./data/results.csv"
+#
+#     - type: json
+#       path: "./data/results.json"
+#
+#     - type: postgres
+#       connection: "postgresql://user:pass@localhost:5432/mapo"
+#       table: "places"
+#
+#     - type: sheets
+#       credentials_file: "./google-credentials.json"
+#       spreadsheet_id: "your-spreadsheet-id"
+#       worksheet: "Sheet1"
+#
+#     - type: s3
+#       bucket: "my-mapo-bucket"
+#       key_prefix: "scrapes/"
+#       region: "us-east-1"
+
+# --- AI Features ---
+# ai:
+#   enabled: false
+#   provider: anthropic      # anthropic, openai
+#   api_key: ""
+#   model: ""                # e.g., claude-sonnet-4-20250514, gpt-4o
