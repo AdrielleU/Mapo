@@ -263,23 +263,43 @@ SOCIAL_MEDIA_KEYS = [
 DETECTION_KEYS = [
     "technologies", "cms", "software_list", "software",
     "ad_pixels", "has_contact_form", "form_provider",
+    "website_quality_score",
 ]
 
 OUTPUT_FIELDS = [
-    "place_id", "name", "description", "is_spending_on_ads", "reviews",
-    "competitors", "website", "can_claim",
+    # Core identity
+    "place_id", "name", "description", "main_category", "categories",
+    "rating", "reviews", "price_range", "status",
+    # Contact
+    "phone", "phone_international", "website", "address",
+    "detailed_address", "coordinates", "plus_code", "time_zone",
+    "link", "reviews_link",
+    # Ownership & signals
+    "owner", "owner_link", "can_claim",
+    "is_spending_on_ads", "is_temporarily_closed", "is_permanently_closed",
+    # Social / enrichment
 ] + SOCIAL_MEDIA_KEYS + [
-    "owner", "featured_image", "main_category", "categories", "rating",
-    "workday_timing", "is_temporarily_closed", "is_permanently_closed",
-    "closed_on", "phone", "address", "review_keywords", "link", "status",
-    "price_range", "reviews_per_rating", "featured_question", "reviews_link",
-    "coordinates", "plus_code", "detailed_address", "time_zone", "cid",
-    "data_id", "about", "images", "hours", "most_popular_times",
-    "popular_times", "menu", "reservations", "order_online_links",
+    # Business details
+    "hours", "closed_on", "service_options", "about",
+    "menu", "reservations", "order_online_links",
+    # Reviews intelligence
+    "reviews_per_rating", "review_keywords", "owner_response_rate",
+    "featured_question",
+    # Competition
+    "competitors",
+    # Media
+    "featured_image", "images", "image_count",
+    # Timing / traffic
+    "popular_times", "most_popular_times",
+    # Detection
 ] + DETECTION_KEYS + [
-    "lead_score", "pitch_summary",
+    # AI scoring
+    "lead_score", "icp_match", "pitch_summary", "suggested_approach",
     "review_sentiment", "review_themes",
-    "featured_reviews", "detailed_reviews", "query",
+    # Reviews data
+    "featured_reviews", "detailed_reviews",
+    # Meta
+    "cid", "data_id", "query",
 ]
 
 
