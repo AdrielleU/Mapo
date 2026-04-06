@@ -2,7 +2,7 @@
 Mapo entry point.
 
 Dispatches to CLI mode (scrape/enrich subcommands) or starts the
-Botasaurus web server with UI.
+FastAPI web server.
 """
 import sys
 
@@ -12,16 +12,14 @@ def main():
         from backend.cli import main as cli_main
         cli_main()
     else:
-        import backend.server  # noqa: F401 — registers scrapers
+        import uvicorn
         from backend.config import config
 
-        # Start scheduler if enabled
         if config.scheduler.enabled:
             from backend.scheduler import scheduler
             scheduler.start()
 
-        from botasaurus_server.run import run
-        run()
+        uvicorn.run("backend.server:app", host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":

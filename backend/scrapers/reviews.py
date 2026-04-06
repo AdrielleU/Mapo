@@ -15,7 +15,6 @@ import httpx
 from lxml import html
 
 from .time_utils import parse_relative_date
-from botasaurus.request import request
 from backend.proxy import proxy_manager, get_random_ua
 
 SORT_OPTIONS = {
@@ -271,18 +270,8 @@ def _process_reviews(reviews):
     return processed
 
 
-@request(
-    close_on_crash=True,
-    output=None,
-    parallel=40,
-)
-def scrape_reviews(requests, data):
-    """
-    Botasaurus task: scrape detailed reviews for a single place.
-
-    Args:
-        data: dict with place_id, link, max, reviews_sort, lang
-    """
+def _scrape_one_review(data):
+    """Scrape reviews for a single place (sync, runs in thread pool)."""
     place_id = data["place_id"]
     link = data["link"]
     max_r = data["max"]
@@ -294,3 +283,22 @@ def scrape_reviews(requests, data):
         processed = _process_reviews(raw_reviews)
 
     return {"place_id": place_id, "reviews": processed}
+
+
+async def scrape_reviews(data_list):
+    """
+    Scrape reviews for multiple places in parallel.
+
+    Uses asyncio.to_thread to run the sync GoogleMapsAPIScraper in a thread pool,
+    with a semaphore limiting to 40 concurrent workers.
+    """
+    import asyncio
+
+    sem = asyncio.Semaphore(40)
+
+    async def fetch(data):
+        async with sem:
+            return await asyncio.to_thread(_scrape_one_review, data)
+
+    tasks = [fetch(d) for d in data_list]
+    return await asyncio.gather(*tasks)

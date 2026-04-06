@@ -1,19 +1,22 @@
-FROM chetan1111/botasaurus:latest
+FROM python:3.12-slim
 
+WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+# System deps for Playwright/Camoufox
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgtk-3-0 libxcursor1 libasound2 libdbus-glib-1-2 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install optional deps if needed (uncomment as required)
-# RUN pip install --no-cache-dir psycopg2-binary gspread google-auth boto3
-# RUN pip install --no-cache-dir anthropic openai
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m playwright install firefox
 
-COPY . /app
+COPY . .
+RUN mkdir -p data
 
-RUN python run.py install
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8000/api/v1/health', timeout=5)" || exit 1
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:8000/api/v1/health', timeout=5)"
 
 CMD ["python", "run.py"]

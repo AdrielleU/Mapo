@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mapo — Google Maps Scraper</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1><span>Mapo</span> &mdash; Maps Scraper</h1>
+    <span class="text-dim text-sm" id="health-status">Connecting...</span>
+  </header>
+
+  <!-- Search Card -->
+  <div class="card">
+    <div class="flex-between">
+      <h2>New Search</h2>
+      <div class="toggle-group">
+        <button class="active" data-mode="quick" onclick="setMode('quick')">Quick Search</button>
+        <button data-mode="structured" onclick="setMode('structured')">Structured</button>
+      </div>
+    </div>
+
+    <form id="search-form" onsubmit="submitSearch(event)">
+      <!-- Quick mode -->
+      <div id="mode-quick" class="mt-1">
+        <div class="form-row">
+          <div style="grid-column:1/-1">
+            <label for="query">Search Query</label>
+            <input type="text" id="query" placeholder='e.g. "Plumbers in Miami"'>
+          </div>
+        </div>
+      </div>
+
+      <!-- Structured mode -->
+      <div id="mode-structured" class="hidden mt-1">
+        <div class="form-row">
+          <div>
+            <label for="country">Country</label>
+            <select id="country" onchange="loadStates()">
+              <option value="US" selected>United States</option>
+            </select>
+          </div>
+          <div>
+            <label for="state">State</label>
+            <select id="state"><option value="">-- Select --</option></select>
+          </div>
+          <div>
+            <label for="biz-type">Business Type</label>
+            <input type="text" id="biz-type" placeholder="e.g. Dentist">
+          </div>
+          <div>
+            <label for="max-results">Max Results</label>
+            <input type="number" id="max-results" value="100" min="1" max="5000">
+          </div>
+        </div>
+      </div>
+
+      <!-- Optional settings -->
+      <div class="collapsible-header" onclick="toggleSection('adv-settings')">
+        &#9654; Advanced Settings
+      </div>
+      <div id="adv-settings" class="collapsible-body">
+        <div class="form-row">
+          <div>
+            <label for="api-key">Enrichment API Key</label>
+            <input type="text" id="api-key" placeholder="Optional">
+          </div>
+          <div>
+            <label for="enable-reviews">Reviews</label>
+            <select id="enable-reviews">
+              <option value="false">Disabled</option>
+              <option value="true">Enabled</option>
+            </select>
+          </div>
+          <div>
+            <label for="reviews-sort">Reviews Sort</label>
+            <select id="reviews-sort">
+              <option value="newest">Newest</option>
+              <option value="most_relevant">Most Relevant</option>
+              <option value="highest_rating">Highest Rating</option>
+              <option value="lowest_rating">Lowest Rating</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-1">
+        <button type="submit" class="btn btn-primary">Run Search</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Jobs Card -->
+  <div class="card">
+    <h2>Jobs</h2>
+    <div id="jobs-list"><span class="text-dim text-sm">No jobs yet.</span></div>
+  </div>
+
+  <!-- Progress Card (shown when a job is running) -->
+  <div class="card hidden" id="progress-card">
+    <h2>Progress &mdash; <span id="progress-job-id"></span></h2>
+    <div class="progress-wrap">
+      <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+      <div class="progress-text" id="progress-text">0%</div>
+    </div>
+    <div class="text-sm text-dim" id="progress-detail"></div>
+  </div>
+
+  <!-- Results Card -->
+  <div class="card hidden" id="results-card">
+    <div class="flex-between">
+      <h2>Results &mdash; <span id="results-job-id"></span></h2>
+      <div class="export-bar">
+        <a class="btn btn-sm btn-secondary" id="dl-csv">CSV</a>
+        <a class="btn btn-sm btn-secondary" id="dl-json">JSON</a>
+      </div>
+    </div>
+    <div class="filter-box mt-1">
+      <input type="text" id="results-filter" placeholder="Filter results..." oninput="filterResults()">
+      <span class="text-sm text-dim" id="results-count"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="results-table">
+        <thead id="results-thead"></thead>
+        <tbody id="results-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ------ State ------ */
+let currentMode = 'quick';
+let allResults = [];
+let sortCol = null;
+let sortAsc = true;
+let wsConn = null;
+let pollTimer = null;
+const COLUMNS = ['name','phone','website','rating','reviews','address','main_category'];
+
+/* ------ Mode toggle ------ */
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.toggle-group button').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+  document.getElementById('mode-quick').classList.toggle('hidden', mode !== 'quick');
+  document.getElementById('mode-structured').classList.toggle('hidden', mode !== 'structured');
+}
+
+/* ------ Collapsible ------ */
+function toggleSection(id) {
+  const el = document.getElementById(id);
+  el.classList.toggle('open');
+  const hdr = el.previousElementSibling;
+  hdr.innerHTML = (el.classList.contains('open') ? '&#9660;' : '&#9654;') + ' Advanced Settings';
+}
+
+/* ------ Load states ------ */
+async function loadStates() {
+  const country = document.getElementById('country').value;
+  try {
+    const r = await fetch(`/api/v1/states?country=${country}`);
+    const data = await r.json();
+    const sel = document.getElementById('state');
+    sel.innerHTML = '<option value="">-- All States --</option>';
+    (data.states || []).forEach(s => {
+      sel.innerHTML += `<option value="${s}">${s}</option>`;
+    });
+  } catch(e) { console.error('Failed to load states', e); }
+}
+
+/* ------ Submit search ------ */
+async function submitSearch(e) {
+  e.preventDefault();
+  let body = {};
+  if (currentMode === 'quick') {
+    const q = document.getElementById('query').value.trim();
+    if (!q) return alert('Enter a search query.');
+    body.query = q;
+  } else {
+    const biz = document.getElementById('biz-type').value.trim();
+    if (!biz) return alert('Enter a business type.');
+    body.country = document.getElementById('country').value;
+    body.state = document.getElementById('state').value || null;
+    body.business_type = biz;
+    body.max_results = parseInt(document.getElementById('max-results').value) || 100;
+  }
+  body.enrichment_api_key = document.getElementById('api-key').value.trim() || null;
+  body.enable_reviews = document.getElementById('enable-reviews').value === 'true';
+  body.reviews_sort = document.getElementById('reviews-sort').value;
+
+  try {
+    const r = await fetch('/api/v1/scrape', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const data = await r.json();
+    if (data.job_id) {
+      connectWS(data.job_id);
+    }
+  } catch(err) { alert('Request failed: ' + err.message); }
+}
+
+/* ------ WebSocket progress ------ */
+function connectWS(jobId) {
+  const card = document.getElementById('progress-card');
+  card.classList.remove('hidden');
+  document.getElementById('progress-job-id').textContent = jobId.slice(0,8);
+  document.getElementById('progress-bar').style.width = '0%';
+  document.getElementById('progress-text').textContent = 'Starting...';
+  document.getElementById('progress-detail').textContent = '';
+
+  if (wsConn) wsConn.close();
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  wsConn = new WebSocket(`${proto}://${location.host}/api/v1/ws/${jobId}`);
+
+  const startTime = Date.now();
+
+  wsConn.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'progress') {
+        const pct = msg.total > 0 ? Math.round((msg.completed / msg.total) * 100) : 0;
+        document.getElementById('progress-bar').style.width = pct + '%';
+        document.getElementById('progress-text').textContent = `${pct}% (${msg.completed}/${msg.total})`;
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+        let eta = '';
+        if (msg.completed > 0 && msg.total > msg.completed) {
+          const rate = (Date.now() - startTime) / msg.completed;
+          eta = ' | ETA: ' + Math.round((msg.total - msg.completed) * rate / 1000) + 's';
+        }
+        document.getElementById('progress-detail').textContent =
+          `${msg.completed}/${msg.total} places scraped | Elapsed: ${elapsed}s${eta}`;
+      } else if (msg.type === 'completed') {
+        document.getElementById('progress-bar').style.width = '100%';
+        document.getElementById('progress-text').textContent = 'Done!';
+        loadJobResults(jobId);
+        wsConn.close();
+      } else if (msg.type === 'error') {
+        document.getElementById('progress-text').textContent = 'Error: ' + (msg.message || 'Unknown');
+      }
+    } catch(e) {}
+  };
+  wsConn.onerror = () => {};
+  wsConn.onclose = () => { wsConn = null; };
+}
+
+/* ------ Load job results ------ */
+async function loadJobResults(jobId) {
+  try {
+    const r = await fetch(`/api/v1/jobs/${jobId}`);
+    const data = await r.json();
+    if (data.results && data.results.length > 0) {
+      showResults(jobId, data.results);
+    }
+  } catch(e) { console.error('Failed to load results', e); }
+}
+
+/* ------ Render results table ------ */
+function showResults(jobId, results) {
+  allResults = results;
+  const card = document.getElementById('results-card');
+  card.classList.remove('hidden');
+  document.getElementById('results-job-id').textContent = jobId.slice(0,8);
+  document.getElementById('dl-csv').href = `/api/v1/jobs/${jobId}/download?format=csv`;
+  document.getElementById('dl-json').href = `/api/v1/jobs/${jobId}/download?format=json`;
+  renderTable(allResults);
+}
+
+function renderTable(data) {
+  const thead = document.getElementById('results-thead');
+  const tbody = document.getElementById('results-tbody');
+  thead.innerHTML = '<tr>' + COLUMNS.map(c =>
+    `<th onclick="sortBy('${c}')">${c}<span class="sort-arrow">${sortCol===c?(sortAsc?'&#9650;':'&#9660;'):''}</span></th>`
+  ).join('') + '</tr>';
+
+  tbody.innerHTML = data.map(row =>
+    '<tr>' + COLUMNS.map(c => {
+      let v = row[c] != null ? row[c] : '';
+      if (c === 'website' && v) v = `<a href="${v}" target="_blank" rel="noopener">${v}</a>`;
+      return `<td title="${String(row[c]||'').replace(/"/g,'&quot;')}">${v}</td>`;
+    }).join('') + '</tr>'
+  ).join('');
+
+  document.getElementById('results-count').textContent = data.length + ' results';
+}
+
+/* ------ Client-side sort ------ */
+function sortBy(col) {
+  if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
+  const sorted = [...allResults].sort((a,b) => {
+    let va = a[col], vb = b[col];
+    if (va == null) va = '';
+    if (vb == null) vb = '';
+    if (typeof va === 'number' && typeof vb === 'number') return sortAsc ? va-vb : vb-va;
+    return sortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+  });
+  renderTable(sorted);
+}
+
+/* ------ Client-side filter ------ */
+function filterResults() {
+  const q = document.getElementById('results-filter').value.toLowerCase();
+  if (!q) { renderTable(allResults); return; }
+  const filtered = allResults.filter(row =>
+    COLUMNS.some(c => String(row[c]||'').toLowerCase().includes(q))
+  );
+  renderTable(filtered);
+}
+
+/* ------ Poll jobs ------ */
+async function pollJobs() {
+  try {
+    const r = await fetch('/api/v1/jobs');
+    const data = await r.json();
+    const list = document.getElementById('jobs-list');
+    const jobs = data.jobs || [];
+    if (jobs.length === 0) { list.innerHTML = '<span class="text-dim text-sm">No jobs yet.</span>'; return; }
+    list.innerHTML = jobs.map(j => {
+      const statusClass = j.status === 'completed' ? 'badge-completed' :
+                          j.status === 'running' ? 'badge-running' :
+                          j.status === 'failed' ? 'badge-failed' : 'badge-created';
+      const label = (j.params && j.params.query) || j.id.slice(0,8);
+      return `<div class="job-item" onclick="loadJobResults('${j.id}')">
+        <span>${label}</span>
+        <span class="badge ${statusClass}">${j.status}</span>
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+
+/* ------ Health check ------ */
+async function checkHealth() {
+  try {
+    const r = await fetch('/api/v1/health');
+    const data = await r.json();
+    document.getElementById('health-status').textContent = data.status === 'ok' ? 'Connected' : 'Error';
+  } catch(e) {
+    document.getElementById('health-status').textContent = 'Disconnected';
+  }
+}
+
+/* ------ Init ------ */
+checkHealth();
+loadStates();
+pollJobs();
+pollTimer = setInterval(pollJobs, 2000);
+setInterval(checkHealth, 15000);
+</script>
+</body>
+</html>

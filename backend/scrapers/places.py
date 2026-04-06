@@ -2,27 +2,24 @@
 Core Google Maps scraping engine.
 
 Uses a browser+HTTP hybrid approach:
-- Headless Chrome scrolls Google Maps to discover place links
-- Parallel HTTP requests fetch individual place pages (much faster)
+- Camoufox (anti-detection Firefox) scrolls Google Maps to discover place links
+- Parallel async httpx requests fetch individual place pages
 
-Anti-detection features:
-- Proxy rotation support
-- Hardened selectors (aria-label/role-based, text-content fallbacks)
-- Behavioral mimicry (randomized scroll delays, timing jitter)
-- User-agent rotation
+Anti-detection: Camoufox fingerprinting, proxy rotation, behavioral mimicry,
+hardened aria-label/text-based selectors, randomized delays.
 """
+import asyncio
 import random
 import traceback
 import urllib.parse
-from time import sleep, time
+from time import time
 
-from botasaurus import bt, cl
-from botasaurus.browser import Driver, browser, AsyncQueueResult, Wait, DetachedElementException
-from botasaurus.cache import DontCache
-from botasaurus.request import request
+import httpx
 
 from .extract import extract_data, extract_possible_map_link
 from backend.proxy import proxy_manager, get_random_ua
+from backend.utils import extract_path, remove_nones
+from backend import cache
 
 
 class StuckInGmapsException(Exception):
@@ -61,65 +58,26 @@ def create_search_link(query, lang, geo_coordinates, zoom):
     return url
 
 
-def perform_visit(driver, link):
-    """Navigate to a Google Maps URL, handling cookie consent on first visit."""
-    if driver.config.is_new:
-        driver.google_get(link, accept_google_cookies=True)
-    else:
-        driver.get_via_this_page(link)
-
-
-def _retry_on_error(func, error_types, retries=3, wait_time=None, on_exhausted=None):
-    """Retry a function on specific exception types."""
-    for attempt in range(retries):
-        try:
-            return func()
-        except tuple(error_types) as e:
-            if attempt < retries - 1:
-                traceback.print_exc()
-                print("Retrying")
-                if wait_time:
-                    sleep(wait_time)
-            else:
-                if on_exhausted:
-                    on_exhausted(e)
-                raise
-
-
-def _human_delay(min_s=0.5, max_s=2.0):
+async def _human_delay(min_s=0.5, max_s=2.0):
     """Sleep for a random human-like interval."""
-    sleep(random.uniform(min_s, max_s))
+    await asyncio.sleep(random.uniform(min_s, max_s))
 
 
-def _get_lang(data):
-    return data["lang"]
+# --- Hardened JS selectors (text/aria-label based, not brittle CSS classes) ---
 
-
-def _get_proxy(data):
-    """Get proxy for Botasaurus decorators."""
-    return proxy_manager.get_proxy()
-
-
-# --- Hardened sponsored link detection ---
-# Uses text-content heuristic instead of brittle CSS classes.
 SPONSORED_LINKS_JS = """
-function get_sponsored_links() {
+() => {
     try {
         const results = [];
-        // Strategy 1: Find elements with "Sponsored" or "Ad" text
-        const allElements = document.querySelectorAll('[role="feed"] a[href*="/maps/place/"]');
-        for (const a of allElements) {
-            const parent = a.closest('[class]');
-            if (!parent) continue;
-            // Walk up to find any sibling/child with ad indicator text
-            const container = parent.parentElement;
+        const allLinks = document.querySelectorAll('[role="feed"] a[href*="/maps/place/"]');
+        for (const a of allLinks) {
+            const container = a.closest('[class]')?.parentElement;
             if (!container) continue;
             const text = container.innerText || '';
             if (/\\b(Sponsored|Ad|Ads)\\b/i.test(text)) {
                 results.push(a.href);
             }
         }
-        // Strategy 2: Fallback — look for aria-label containing "Sponsored"
         const sponsored = document.querySelectorAll('[aria-label*="Sponsored"], [aria-label*="sponsored"]');
         for (const el of sponsored) {
             const link = el.querySelector('a[href*="/maps/place/"]') || el.closest('a[href*="/maps/place/"]');
@@ -130,56 +88,90 @@ function get_sponsored_links() {
         return [];
     }
 }
-return get_sponsored_links();
 """
 
-# Hardened end-of-results detection JS
 END_OF_RESULTS_JS = """
-function check_end_of_list() {
-    // Strategy 1: Look for "You've reached the end of the list" text
+() => {
     const body = document.body.innerText || '';
     if (/reached the end of the list/i.test(body)) return true;
     if (/no more results/i.test(body)) return true;
-    // Strategy 2: Check for the end-marker span (fallback)
     const markers = document.querySelectorAll('p.fontBodyMedium > span > span');
     return markers.length > 0;
 }
-return check_end_of_list();
+"""
+
+SCROLL_FEED_JS = """
+(selector) => {
+    const feed = document.querySelector(selector);
+    if (feed) feed.scrollTo(0, feed.scrollHeight);
+}
+"""
+
+CAN_SCROLL_JS = """
+(selector) => {
+    const feed = document.querySelector(selector);
+    if (!feed) return false;
+    return feed.scrollHeight > feed.scrollTop + feed.clientHeight + 5;
+}
+"""
+
+GET_LINKS_JS = """
+(selector) => {
+    const links = document.querySelectorAll(selector);
+    return [...links].map(a => a.href).filter(h => h.includes('/maps/place/'));
+}
 """
 
 
-@request(
-    close_on_crash=True,
-    output=None,
-    parallel=5,
-    async_queue=True,
-    max_retry=5,
-    retry_wait=5,
-)
-def scrape_place(requests, link, metadata):
-    """Fetch a single place page via HTTP and extract data."""
-    cookies = metadata["cookies"]
-    os_name = metadata["os"]
-    user_agent = metadata.get("user_agent") or get_random_ua()
+async def scrape_place(link, cookies, user_agent, proxy=None):
+    """Fetch a single place page via async HTTP and extract structured data."""
+    # Check cache first
+    cached = cache.get(link)
+    if cached:
+        return cached
 
-    html = requests.get(
-        link,
-        cookies=cookies,
-        browser="chrome",
-        os=os_name,
-        user_agent=user_agent,
-        timeout=12,
-    ).text
+    proxy_url = proxy or (proxy_manager.get_proxy() if proxy_manager.enabled else None)
 
-    try:
-        init_state = html.split(";window.APP_INITIALIZATION_STATE=")[1]
-        app_state = init_state.split(";window.APP_FLAGS")[0]
-    except (IndexError, AttributeError):
-        raise RetryException("Failed to find APP_INITIALIZATION_STATE, retrying...")
+    async with httpx.AsyncClient(
+        http2=True,
+        proxy=proxy_url,
+        timeout=15.0,
+        follow_redirects=True,
+    ) as client:
+        headers = {
+            "User-Agent": user_agent or get_random_ua(),
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        cookie_dict = {}
+        if cookies:
+            for c in cookies:
+                cookie_dict[c["name"]] = c["value"]
 
-    data = extract_data(app_state, link)
-    data["is_spending_on_ads"] = False
-    return data
+        for attempt in range(5):
+            try:
+                resp = await client.get(link, headers=headers, cookies=cookie_dict)
+                html = resp.text
+
+                init_state = html.split(";window.APP_INITIALIZATION_STATE=")[1]
+                app_state = init_state.split(";window.APP_FLAGS")[0]
+
+                data = extract_data(app_state, link)
+                data["is_spending_on_ads"] = False
+                cache.put(link, data)
+                return data
+
+            except (IndexError, AttributeError):
+                if attempt < 4:
+                    await asyncio.sleep(2 * (attempt + 1))
+                    continue
+                raise RetryException(f"Failed to extract data from {link} after 5 attempts")
+            except Exception:
+                if attempt < 4:
+                    await asyncio.sleep(2 * (attempt + 1))
+                    continue
+                traceback.print_exc()
+                return None
 
 
 def _extract_map_link_from_html(html):
@@ -188,148 +180,158 @@ def _extract_map_link_from_html(html):
         init_state = html.split(";window.APP_INITIALIZATION_STATE=")[1]
         app_state = init_state.split(";window.APP_FLAGS")[0]
         link = extract_possible_map_link(app_state)
-        if link and cl.extract_path_from_link(link).startswith("/maps/place"):
+        if link and extract_path(link).startswith("/maps/place"):
             return link
     except Exception:
         return None
 
 
-@browser(
-    lang=_get_lang,
-    close_on_crash=True,
-    max_retry=3,
-    reuse_driver=True,
-    headless=True,
-    output=None,
-)
-def scrape_places(driver: Driver, data):
+async def scrape_places(data, progress_cb=None):
     """
-    Main scraping entry point. Scrolls Google Maps search results in a headless
-    browser, collects place links, and dispatches them to scrape_place() via
-    an async queue for parallel HTTP fetching.
+    Main scraping entry point.
+
+    Scrolls Google Maps search results using Camoufox (anti-detection Firefox),
+    collects place links, then fetches each place page in parallel via httpx.
+
+    Args:
+        data: dict with query, max, lang, geo_coordinates, zoom, links
+        progress_cb: optional async callback(found, scraped, elapsed)
+
+    Returns:
+        {"query": str, "places": list[dict]}
     """
+    from camoufox.async_api import AsyncNewBrowser
+
     max_results = data["max"]
     query = data["query"]
+    direct_links = data.get("links")
+    start_time = time()
 
-    place_queue: AsyncQueueResult = scrape_place()
+    proxy_url = proxy_manager.get_proxy() if proxy_manager.enabled else None
 
-    sponsored_links = None
-
-    def get_sponsored_links():
-        nonlocal sponsored_links
-        if sponsored_links is None:
-            sponsored_links = driver.run_js(SPONSORED_LINKS_JS)
-        return sponsored_links
-
-    def scroll_and_collect():
-        """Scroll the results feed and push discovered links to the queue."""
-        start_time = time()
-        base_wait = 40
-        WAIT_TIME = base_wait + random.uniform(-5, 10)  # Jittered timeout
-
-        meta = {
-            "cookies": driver.get_cookies_dict(),
-            "os": bt.get_os(),
-            "user_agent": driver.user_agent,
-        }
-
-        # Direct link mode: skip scrolling
-        if data["links"]:
-            place_queue.put(data["links"], metadata=meta)
-            return
-
-        while True:
-            feed = driver.select('[role="feed"]', Wait.LONG)
-
-            if feed is None:
-                # Single result or no results
-                if driver.is_in_page("/maps/search/"):
-                    link = _extract_map_link_from_html(driver.page_html)
-                    if link:
-                        place_queue.put([link], metadata=meta)
-                elif driver.is_in_page("/maps/place/"):
-                    place_queue.put([driver.current_url], metadata=meta)
-                return
-
-            feed.scroll_to_bottom()
-            _human_delay(0.3, 1.5)  # Behavioral mimicry
-
-            # Extract links — use ARIA-based selector, filter for Maps place URLs
-            raw_links = driver.get_all_links(
-                '[role="feed"] > div > div > a', wait=Wait.LONG
-            )
-            # Filter to only Google Maps place links
-            place_links = [l for l in raw_links if "/maps/place/" in l]
-
-            if max_results is None:
-                links = place_links
-            else:
-                links = unique_strings(place_links)[:max_results]
-
-            place_queue.put(links, metadata=meta)
-
-            if max_results is not None and len(links) >= max_results:
-                return
-
-            # Hardened end-of-results check via JS (text-content based)
-            is_end = driver.run_js(END_OF_RESULTS_JS)
-            if is_end:
-                return
-
-            elapsed = time() - start_time
-            if elapsed > WAIT_TIME:
-                print("Google Maps stuck scrolling. Retrying after a minute.")
-                sleep(random.uniform(55, 70))  # Jittered retry wait
-                raise StuckInGmapsException()
-
-            if driver.can_scroll_further('[role="feed"]'):
-                start_time = time()
-            else:
-                _human_delay(0.1, 0.4)
-
-    search_link = create_search_link(
-        query, data["lang"], data["geo_coordinates"], data["zoom"]
-    )
-    perform_visit(driver, search_link)
-
-    if driver.is_in_page("/sorry/"):
-        raise Exception("Detected by Google, retrying...")
-
-    failed_to_scroll = False
-
-    def on_exhausted(e):
-        nonlocal failed_to_scroll
-        failed_to_scroll = True
-        print("Failed to scroll after retries. Skipping.")
-
-    try:
-        _retry_on_error(
-            scroll_and_collect,
-            [DetachedElementException],
-            retries=5,
-            on_exhausted=on_exhausted,
+    async with AsyncNewBrowser(
+        headless=True,
+        proxy={"server": proxy_url} if proxy_url else None,
+    ) as browser:
+        context = await browser.new_context(
+            locale="en-US",
+            timezone_id="America/New_York",
         )
-        if driver.config.is_retry:
-            print("Successfully scrolled to the end.")
-    except StuckInGmapsException as e:
-        if driver.config.is_last_retry:
-            on_exhausted(e)
-        else:
-            raise
+        page = await context.new_page()
 
-    places = place_queue.get()
-    places = bt.remove_nones(places)
+        # Navigate to Google Maps search
+        search_link = create_search_link(
+            query, data["lang"], data["geo_coordinates"], data["zoom"]
+        )
+        await page.goto(search_link, wait_until="domcontentloaded", timeout=30000)
+
+        # Handle cookie consent
+        try:
+            consent_btn = page.get_by_role("button", name="Accept all")
+            await consent_btn.click(timeout=3000)
+            await asyncio.sleep(1)
+        except Exception:
+            pass  # No consent dialog
+
+        # Check for blocking
+        if "/sorry/" in page.url:
+            raise Exception("Detected by Google, retrying...")
+
+        # Collect place links
+        if direct_links:
+            discovered_links = direct_links
+        else:
+            discovered_links = await _scroll_and_collect(page, max_results, start_time)
+
+        # Get sponsored links before closing
+        sponsored = await page.evaluate(SPONSORED_LINKS_JS) if not direct_links else []
+
+        # Grab cookies + UA for HTTP fetching
+        cookies = await context.cookies()
+        user_agent = await page.evaluate("() => navigator.userAgent")
+
+        await context.close()
+
+    # --- Fetch each place page in parallel via httpx ---
+    if not discovered_links:
+        return {"query": query, "places": []}
+
+    discovered_links = unique_strings(discovered_links)
+
+    sem = asyncio.Semaphore(5)
+    scraped_count = 0
+
+    async def fetch_one(link):
+        nonlocal scraped_count
+        async with sem:
+            result = await scrape_place(link, cookies, user_agent)
+            scraped_count += 1
+            if progress_cb:
+                await progress_cb(len(discovered_links), scraped_count, time() - start_time)
+            return result
+
+    tasks = [fetch_one(link) for link in discovered_links]
+    results = await asyncio.gather(*tasks)
+    places = remove_nones(results)
 
     for p in places:
         p["query"] = query
 
-    ad_links = [] if data["links"] else get_sponsored_links()
+    # Mark sponsored
     for place in places:
-        place["is_spending_on_ads"] = place["link"] in ad_links
+        place["is_spending_on_ads"] = place.get("link", "") in sponsored
 
-    result = {"query": query, "places": places}
+    return {"query": query, "places": places}
 
-    if failed_to_scroll or any(p is None for p in places):
-        return DontCache(result)
 
-    return result
+async def _scroll_and_collect(page, max_results, start_time):
+    """Scroll the Google Maps results feed and collect place links."""
+    WAIT_TIME = 40 + random.uniform(-5, 10)
+    links = []
+
+    try:
+        await page.wait_for_selector('[role="feed"]', timeout=15000)
+    except Exception:
+        # No feed — might be single result or no results
+        if "/maps/search/" in page.url:
+            html = await page.content()
+            link = _extract_map_link_from_html(html)
+            return [link] if link else []
+        elif "/maps/place/" in page.url:
+            return [page.url]
+        return []
+
+    scroll_start = time()
+
+    while True:
+        # Scroll to bottom of feed
+        await page.evaluate(SCROLL_FEED_JS, '[role="feed"]')
+        await _human_delay(0.3, 1.5)
+
+        # Extract place links
+        current_links = await page.evaluate(GET_LINKS_JS, '[role="feed"] > div > div > a')
+        links = unique_strings(current_links)
+
+        if max_results and len(links) >= max_results:
+            return links[:max_results]
+
+        # Check if we've reached the end
+        is_end = await page.evaluate(END_OF_RESULTS_JS)
+        if is_end:
+            return links
+
+        # Timeout — stuck scrolling
+        elapsed = time() - scroll_start
+        if elapsed > WAIT_TIME:
+            print("Google Maps stuck scrolling. Retrying after a minute.")
+            await asyncio.sleep(random.uniform(55, 70))
+            raise StuckInGmapsException()
+
+        # Reset timeout if scroll position changed
+        can_scroll = await page.evaluate(CAN_SCROLL_JS, '[role="feed"]')
+        if can_scroll:
+            scroll_start = time()
+        else:
+            await _human_delay(0.1, 0.4)
+
+    return links

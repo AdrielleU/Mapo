@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Mapo is a Google Maps business data scraper with enrichment, detection, AI analysis, and multi-target output. Built on the Botasaurus framework. Supports web UI, REST API, CLI, webhooks, and cron scheduling.
+Mapo is a Google Maps business data scraper with enrichment, detection, AI analysis, and multi-target output. Built on FastAPI with Camoufox/Playwright for stealth browser automation and asyncio for concurrency. Supports web UI, REST API, CLI, webhooks, and cron scheduling.
 
 Derived from [omkarcloud/google-maps-scraper](https://github.com/omkarcloud/google-maps-scraper), rebuilt with a modular architecture.
 
@@ -12,18 +12,18 @@ Derived from [omkarcloud/google-maps-scraper](https://github.com/omkarcloud/goog
 # Set up venv
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+python -m playwright install firefox
 
-# Run web UI + API server
+# Run web UI + API server (single port)
 python run.py
 
 # Or use Docker
 docker-compose up
 ```
 
-- Frontend UI: http://localhost:3000
-- Backend API: http://localhost:8000
-- REST API: http://localhost:8000/api/v1/health
-- Requires Google Chrome on host (for browser-based scraping)
+- Web UI + API: http://localhost:8000
+- Health check: http://localhost:8000/api/v1/health
+- Frontend served as static files from `frontend/`
 
 ## CLI Usage
 
@@ -41,16 +41,19 @@ python run.py enrich --input places.csv --provider hunter --output enriched.csv
 ## Architecture
 
 ```
-run.py                              # Entry point: CLI dispatch or server start
+run.py                              # Entry point: CLI dispatch or FastAPI server
+├── frontend/
+│   ├── index.html                  # Single-page web UI (no build step)
+│   └── style.css                   # Dark theme styles
 ├── backend/
 │   ├── config.py                   # Central config (mapo.yaml + env vars)
 │   ├── proxy.py                    # Proxy rotation manager (HTTP/HTTPS/SOCKS5)
 │   ├── webhooks.py                 # Webhook delivery with Slack support
 │   ├── scheduler.py                # APScheduler cron jobs
 │   ├── cli.py                      # CLI interface (scrape/enrich subcommands)
-│   ├── server.py                   # Botasaurus server registration + orchestration
+│   ├── server.py                   # FastAPI app, WebSocket progress, job mgmt
 │   ├── scrapers/
-│   │   ├── places.py               # Browser+HTTP hybrid scraper with anti-detection
+│   │   ├── places.py               # Camoufox+HTTP hybrid scraper with anti-detection
 │   │   ├── extract.py              # Parses APP_INITIALIZATION_STATE JSON
 │   │   ├── reviews.py              # Google Maps internal review API (parallel=40)
 │   │   ├── social.py               # Pluggable enrichment integration
@@ -74,14 +77,17 @@ run.py                              # Entry point: CLI dispatch or server start
 │   │   ├── lead_scoring.py         # Lead score + pitch summary
 │   │   └── review_analysis.py      # Sentiment + themes
 │   ├── api/                        # REST API (v1)
-│   │   ├── routes.py               # /scrape, /jobs, /enrich, /health
+│   │   ├── routes.py               # /scrape, /jobs, /enrich, /health, /states
 │   │   └── models.py               # Request validation
-│   ├── inputs/                     # UI form definitions (JS)
-│   └── data/                       # Country/category static data
+│   ├── inputs/                     # UI form definitions
+│   └── data/                       # Country/category/state static data
+│       ├── countries.py            # Country → city mappings
+│       ├── categories.py           # Google Maps category options
+│       └── states.py               # US state → city mappings
 ├── mapo.yaml                       # Configuration file
 ├── .env.example                    # Environment variable template
-├── Dockerfile                      # Docker image with healthcheck
-└── docker-compose.yaml             # Ports 3000+8000, optional PostgreSQL
+├── Dockerfile                      # python:3.12-slim + Playwright Firefox
+└── docker-compose.yaml             # Single port 8000, volumes for data/ + config
 ```
 
 ## Configuration
@@ -98,37 +104,44 @@ Settings in `mapo.yaml` with env var overrides (see `.env.example`):
 ## REST API
 
 ```
-POST /api/v1/scrape      — start scrape job
-GET  /api/v1/jobs         — list all jobs
-GET  /api/v1/jobs/{id}    — job status + results
-DELETE /api/v1/jobs/{id}  — cancel/delete job
-POST /api/v1/enrich       — standalone enrichment
-GET  /api/v1/health       — health check
+POST /api/v1/scrape          — start scrape job
+GET  /api/v1/jobs             — list all jobs
+GET  /api/v1/jobs/{id}        — job status + results
+GET  /api/v1/jobs/{id}/download?format=csv — download results
+DELETE /api/v1/jobs/{id}      — cancel/delete job
+POST /api/v1/enrich           — standalone enrichment
+GET  /api/v1/states?country=US — list states for country
+GET  /api/v1/health           — health check
+WS   /api/v1/ws/{job_id}     — real-time progress updates
 ```
 
 ## Scraping Pipeline
 
 1. Query submitted (UI / API / CLI / scheduler)
-2. `server.py` splits into sub-tasks (per query or per city)
-3. `places.scrape_places()` — headless Chrome scrolls results with anti-detection
-4. `places.scrape_place()` — parallel HTTP (×5) fetches individual pages
+2. Server splits into sub-tasks (per query or per city via state data)
+3. `places.scrape_places()` — Camoufox (stealth Firefox) scrolls results
+4. `places.scrape_place()` — parallel HTTP (x5) fetches individual pages
 5. `extract.extract_data()` — parses Google's APP_INITIALIZATION_STATE
 6. (Optional) `enrichment` — pluggable provider for emails/social
 7. (Optional) `detection` — tech stack, ad pixels, contact forms
-8. (Optional) `reviews` — Google's internal review API (×40 parallel)
+8. (Optional) `reviews` — Google's internal review API (x40 parallel)
 9. (Optional) `ai` — LLM lead scoring + review analysis
 10. Results deduped, filtered, written to configured outputs, webhook fired
 
 ## Anti-Detection
 
+- Camoufox (patched Firefox) for undetectable browser fingerprints
 - Proxy rotation (HTTP/HTTPS/SOCKS5) with geo-matching
 - Hardened selectors (aria-label/role-based, text-content fallbacks)
 - Behavioral mimicry (randomized delays, jittered timeouts)
-- User-agent rotation (12+ current Chrome UAs)
+- User-agent rotation (12+ current browser UAs)
 - httpx with HTTP/2 (defeats TLS fingerprinting)
 
 ## Tech Stack
 
-- Python 3.12+, Botasaurus >=4.0.97, botasaurus-server >=4.0.61
+- Python 3.12+, FastAPI, uvicorn, Pydantic
+- Camoufox + Playwright (stealth Firefox automation)
 - httpx (HTTP/2), lxml, regex, APScheduler, rich
+- asyncio throughout, WebSocket for real-time progress
+- Frontend: vanilla HTML/CSS/JS (no build step, no Node.js)
 - Optional: psycopg2, gspread, boto3, anthropic, openai

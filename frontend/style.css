@@ -1,0 +1,233 @@
+/* Mapo — Dark Theme */
+:root {
+  --bg: #1a1a2e;
+  --card: #16213e;
+  --accent: #0f3460;
+  --highlight: #e94560;
+  --text: #eee;
+  --text-dim: #8892a4;
+  --border: #243452;
+  --success: #2ecc71;
+  --warning: #f39c12;
+  --error: #e74c3c;
+  --radius: 8px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+.container { max-width: 1280px; margin: 0 auto; padding: 1rem; }
+
+h1 { font-size: 1.6rem; font-weight: 700; }
+h1 span { color: var(--highlight); }
+h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-dim); }
+
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.8rem 0; border-bottom: 1px solid var(--border); margin-bottom: 1rem;
+}
+
+/* Cards */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.2rem;
+  margin-bottom: 1rem;
+}
+
+/* Form elements */
+label { display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.25rem; }
+
+input, select, textarea {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+input:focus, select:focus { border-color: var(--highlight); }
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Buttons */
+btn, .btn {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.55rem 1.2rem;
+  border: none; border-radius: var(--radius);
+  font-size: 0.9rem; font-weight: 600;
+  cursor: pointer; transition: background 0.2s, transform 0.1s;
+  text-decoration: none; color: #fff;
+}
+.btn:active { transform: scale(0.97); }
+.btn-primary { background: var(--highlight); }
+.btn-primary:hover { background: #c73a52; }
+.btn-secondary { background: var(--accent); }
+.btn-secondary:hover { background: #0d2b50; }
+.btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+
+/* Toggle */
+.toggle-group {
+  display: inline-flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.toggle-group button {
+  padding: 0.4rem 1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.toggle-group button.active {
+  background: var(--highlight);
+  color: #fff;
+}
+
+/* Progress bar */
+.progress-wrap {
+  background: var(--bg);
+  border-radius: 20px;
+  overflow: hidden;
+  height: 22px;
+  position: relative;
+  margin: 0.5rem 0;
+}
+.progress-bar {
+  height: 100%;
+  border-radius: 20px;
+  background: linear-gradient(90deg, var(--accent), var(--highlight));
+  background-size: 200% 100%;
+  animation: shimmer 2s ease infinite;
+  transition: width 0.4s ease;
+  min-width: 0;
+}
+.progress-text {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.75rem; font-weight: 600;
+  pointer-events: none;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Jobs list */
+.job-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.job-item:hover { background: rgba(233,69,96,0.08); }
+.job-item:last-child { border-bottom: none; }
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.badge-running { background: var(--warning); color: #222; }
+.badge-completed { background: var(--success); color: #222; }
+.badge-failed { background: var(--error); color: #fff; }
+.badge-created { background: var(--accent); color: #fff; }
+
+/* Results table */
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 0.5rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+th {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  position: sticky;
+  top: 0;
+}
+th:hover { background: #12407a; }
+th .sort-arrow { margin-left: 0.3rem; font-size: 0.7rem; }
+tr:nth-child(even) td { background: rgba(22,33,62,0.5); }
+tr:hover td { background: rgba(233,69,96,0.06); }
+
+a { color: var(--highlight); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Filter box */
+.filter-box {
+  display: flex; gap: 0.5rem; align-items: center;
+  margin-bottom: 0.5rem;
+}
+.filter-box input { max-width: 280px; }
+
+/* Export bar */
+.export-bar {
+  display: flex; gap: 0.5rem; align-items: center;
+  margin-top: 0.75rem;
+}
+
+/* Collapsible */
+.collapsible-header {
+  display: flex; align-items: center; gap: 0.4rem;
+  cursor: pointer; color: var(--text-dim); font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+.collapsible-header:hover { color: var(--text); }
+.collapsible-body { display: none; margin-top: 0.5rem; }
+.collapsible-body.open { display: block; }
+
+/* Utilities */
+.hidden { display: none !important; }
+.mt-1 { margin-top: 0.5rem; }
+.text-dim { color: var(--text-dim); }
+.text-sm { font-size: 0.8rem; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+
+/* Responsive */
+@media (max-width: 640px) {
+  .form-row { grid-template-columns: 1fr; }
+  .container { padding: 0.5rem; }
+  th, td { padding: 0.35rem 0.45rem; font-size: 0.75rem; }
+}

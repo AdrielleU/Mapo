@@ -8,7 +8,7 @@ import json
 import re
 from datetime import datetime
 
-from botasaurus import bt
+from backend.utils import extract_domain, extract_path
 
 
 def safe_get(data, *keys):
@@ -56,9 +56,9 @@ def to_high_res_image(img):
     """Convert Google user-content image URLs to 1024px resolution."""
     if not img:
         return img
-    domain = bt.extract_domain_from_link(img)
+    domain = extract_domain(img)
     if "googleusercontent." in domain:
-        img_id = bt.extract_path_from_link(img).split("/")[-1].split("=")[0]
+        img_id = extract_path(img).split("/")[-1].split("=")[0]
         return f"https://lh3.ggpht.com/p/{img_id}=s1024"
     return img
 
@@ -170,6 +170,12 @@ def extract_data(input_str, link):
         query = _extract_business_name(link)
         reviews_link = _generate_reviews_url(place_id, query, 0, hl, gl)
 
+    # Extract photos
+    featured_image = to_high_res_image(safe_get(data, 6, 37, 0, 0, 6, 0))
+    raw_images = safe_get(data, 6, 171, 0) or []
+    images = [to_high_res_image(safe_get(img, 6, 0)) for img in raw_images if safe_get(img, 6, 0)]
+    image_count = safe_get(data, 6, 171, 3) or len(images)
+
     return {
         "place_id": place_id,
         "name": safe_get(data, 6, 11),
@@ -184,6 +190,9 @@ def extract_data(input_str, link):
         "detailed_address": complete_address,
         "link": link,
         "reviews_link": reviews_link,
+        "featured_image": featured_image,
+        "images": images,
+        "image_count": image_count,
         "featured_reviews": _extract_featured_reviews(data),
     }
 

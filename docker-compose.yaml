@@ -5,11 +5,9 @@ services:
     restart: "no"
     shm_size: 800m
     volumes:
-      - .:/app
       - ./data:/app/data
       - ./mapo.yaml:/app/mapo.yaml:ro
     ports:
-      - "3000:3000"
       - "8000:8000"
     env_file:
       - .env
