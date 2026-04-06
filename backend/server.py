@@ -261,7 +261,8 @@ SOCIAL_MEDIA_KEYS = [
 ]
 
 DETECTION_KEYS = [
-    "technologies", "cms", "ad_pixels", "has_contact_form", "form_provider",
+    "technologies", "cms", "software_list", "software",
+    "ad_pixels", "has_contact_form", "form_provider",
 ]
 
 OUTPUT_FIELDS = [
