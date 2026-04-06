@@ -9,6 +9,7 @@ Usage::
 """
 from backend.config import config
 from backend.enrichment.base import EnrichmentProvider
+from backend.enrichment.email_quality import classify_email, analyze_emails
 
 
 _PROVIDERS: dict[str, str] = {

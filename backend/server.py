@@ -293,6 +293,8 @@ OUTPUT_FIELDS = [
     "popular_times", "most_popular_times",
     # Detection
 ] + DETECTION_KEYS + [
+    # Email intelligence
+    "best_email", "best_email_type", "best_email_score", "email_recommendation",
     # AI scoring
     "lead_score", "icp_match", "pitch_summary", "suggested_approach",
     "review_sentiment", "review_themes",
@@ -471,6 +473,22 @@ async def run_pipeline(job_id: str, params: dict):
             social_results = []
 
         all_places = _merge_social_data(all_places, social_results, should_scrape_socials)
+
+        # -- email quality analysis -----------------------------------------
+        from backend.enrichment.email_quality import analyze_emails
+        for place in all_places:
+            emails = place.get("emails", [])
+            if emails and isinstance(emails, list) and emails[0] and "@" in str(emails[0]):
+                analysis = analyze_emails(emails)
+                place["best_email"] = analysis["best_email"]
+                place["best_email_type"] = analysis["best_type"]
+                place["best_email_score"] = analysis["best_score"]
+                place["email_recommendation"] = analysis["recommendation"]
+            else:
+                place["best_email"] = None
+                place["best_email_type"] = None
+                place["best_email_score"] = 0
+                place["email_recommendation"] = "No email found. Try cold calling."
 
         # -- reviews --------------------------------------------------------
         if params.get("enable_reviews"):
