@@ -1,75 +1,134 @@
-# CLAUDE.md - Mapo MVP
+# CLAUDE.md — Mapo
 
 ## Project Overview
 
-Mapo MVP is a Google Maps business data scraper built on the Botasaurus framework. It extracts business listings, contact info, social media profiles, and reviews from Google Maps. Derived from [omkarcloud/google-maps-scraper](https://github.com/omkarcloud/google-maps-scraper) (commit `80569e9`), rewritten with a cleaner module structure.
+Mapo is a Google Maps business data scraper with enrichment, detection, AI analysis, and multi-target output. Built on the Botasaurus framework. Supports web UI, REST API, CLI, webhooks, and cron scheduling.
+
+Derived from [omkarcloud/google-maps-scraper](https://github.com/omkarcloud/google-maps-scraper), rebuilt with a modular architecture.
 
 ## Quick Start
 
 ```bash
-# Docker (recommended)
-docker-compose up
-
-# Local
+# Set up venv
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+
+# Run web UI + API server
 python run.py
+
+# Or use Docker
+docker-compose up
 ```
 
 - Frontend UI: http://localhost:3000
 - Backend API: http://localhost:8000
-- Requires Google Chrome installed on host
+- REST API: http://localhost:8000/api/v1/health
+- Requires Google Chrome on host (for browser-based scraping)
+
+## CLI Usage
+
+```bash
+# Scrape from command line
+python run.py scrape --query "restaurants in NYC" --max-results 100 --output results.csv
+
+# Country-wide scrape
+python run.py scrape --country US --business-type "dentist" --output dentists.json
+
+# Enrich existing data
+python run.py enrich --input places.csv --provider hunter --output enriched.csv
+```
 
 ## Architecture
 
 ```
-run.py                              # Entry point — starts botasaurus_server
+run.py                              # Entry point: CLI dispatch or server start
 ├── backend/
-│   ├── server.py                   # Orchestration: registers scrapers, defines UI, task splitting
+│   ├── config.py                   # Central config (mapo.yaml + env vars)
+│   ├── proxy.py                    # Proxy rotation manager (HTTP/HTTPS/SOCKS5)
+│   ├── webhooks.py                 # Webhook delivery with Slack support
+│   ├── scheduler.py                # APScheduler cron jobs
+│   ├── cli.py                      # CLI interface (scrape/enrich subcommands)
+│   ├── server.py                   # Botasaurus server registration + orchestration
 │   ├── scrapers/
-│   │   ├── places.py               # Core engine: @browser scrolls Maps, @request fetches pages
-│   │   ├── extract.py              # Parses APP_INITIALIZATION_STATE JSON from Google Maps HTML
-│   │   ├── reviews.py              # GoogleMapsAPIScraper: hits internal review API (parallel=40)
-│   │   ├── social.py               # RapidAPI social scraper for emails/phones/social links
+│   │   ├── places.py               # Browser+HTTP hybrid scraper with anti-detection
+│   │   ├── extract.py              # Parses APP_INITIALIZATION_STATE JSON
+│   │   ├── reviews.py              # Google Maps internal review API (parallel=40)
+│   │   ├── social.py               # Pluggable enrichment integration
 │   │   ├── filters.py              # Result filtering and field ordering
-│   │   └── time_utils.py           # Relative date parsing ("2 months ago" → datetime)
-│   ├── inputs/
-│   │   ├── google_maps_scraper.js  # UI form definition for the main scraper
-│   │   └── website_contacts_scraper.js  # UI form for standalone website contacts
-│   └── data/
-│       ├── countries.py            # Country code → cities mapping (~240 countries)
-│       └── categories.py           # ~1500 business category options for UI filters
-├── Dockerfile                      # Based on chetan1111/botasaurus:latest
-└── docker-compose.yaml             # Ports 3000 + 8000, shm_size 800m for Chrome
+│   │   └── time_utils.py           # Relative date parsing
+│   ├── enrichment/                 # Pluggable enrichment providers
+│   │   ├── base.py                 # EnrichmentProvider ABC
+│   │   ├── rapidapi.py             # RapidAPI Website Social Scraper
+│   │   ├── hunter.py               # Hunter.io email enrichment
+│   │   └── apollo.py               # Apollo.io company enrichment
+│   ├── detection/                  # Website analysis
+│   │   ├── techstack.py            # WordPress, Shopify, React, etc.
+│   │   ├── adpixels.py             # Facebook Pixel, Google Ads, etc.
+│   │   └── contactform.py          # Contact form + provider detection
+│   ├── outputs/                    # Multi-target output writers
+│   │   ├── csv_writer.py, json_writer.py
+│   │   ├── postgres.py             # PostgreSQL (upsert by place_id)
+│   │   ├── sheets.py               # Google Sheets
+│   │   └── s3.py                   # AWS S3
+│   ├── ai/                         # LLM-powered features
+│   │   ├── lead_scoring.py         # Lead score + pitch summary
+│   │   └── review_analysis.py      # Sentiment + themes
+│   ├── api/                        # REST API (v1)
+│   │   ├── routes.py               # /scrape, /jobs, /enrich, /health
+│   │   └── models.py               # Request validation
+│   ├── inputs/                     # UI form definitions (JS)
+│   └── data/                       # Country/category static data
+├── mapo.yaml                       # Configuration file
+├── .env.example                    # Environment variable template
+├── Dockerfile                      # Docker image with healthcheck
+└── docker-compose.yaml             # Ports 3000+8000, optional PostgreSQL
+```
+
+## Configuration
+
+Settings in `mapo.yaml` with env var overrides (see `.env.example`):
+
+- **Proxy**: rotation strategy (round-robin/random/geo-match), HTTP/HTTPS/SOCKS5
+- **Enrichment**: provider selection (rapidapi/hunter/apollo) + API key
+- **Webhooks**: URLs for task.completed/task.failed notifications (Slack support)
+- **Scheduler**: cron jobs with output targets
+- **Outputs**: CSV, JSON, PostgreSQL, Google Sheets, S3
+- **AI**: Claude or OpenAI for lead scoring + review analysis
+
+## REST API
+
+```
+POST /api/v1/scrape      — start scrape job
+GET  /api/v1/jobs         — list all jobs
+GET  /api/v1/jobs/{id}    — job status + results
+DELETE /api/v1/jobs/{id}  — cancel/delete job
+POST /api/v1/enrich       — standalone enrichment
+GET  /api/v1/health       — health check
 ```
 
 ## Scraping Pipeline
 
-1. User submits query via UI or API
-2. `server.py:split_task_by_query()` splits into sub-tasks (per query, or per city if country mode)
-3. `places.scrape_places()` — headless Chrome scrolls results feed, collects place links
-4. `places.scrape_place()` — parallel HTTP requests (×5) fetch individual pages
-5. `extract.extract_data()` — parses Google's `APP_INITIALIZATION_STATE` JSON blob
-6. (Optional) `social.scrape_social()` — RapidAPI enrichment for emails/social
-7. (Optional) `reviews.scrape_reviews()` — Google's internal review API (×40 parallel)
-8. Results merged, deduped by `place_id`, displayed in UI with filters/sorts/export
+1. Query submitted (UI / API / CLI / scheduler)
+2. `server.py` splits into sub-tasks (per query or per city)
+3. `places.scrape_places()` — headless Chrome scrolls results with anti-detection
+4. `places.scrape_place()` — parallel HTTP (×5) fetches individual pages
+5. `extract.extract_data()` — parses Google's APP_INITIALIZATION_STATE
+6. (Optional) `enrichment` — pluggable provider for emails/social
+7. (Optional) `detection` — tech stack, ad pixels, contact forms
+8. (Optional) `reviews` — Google's internal review API (×40 parallel)
+9. (Optional) `ai` — LLM lead scoring + review analysis
+10. Results deduped, filtered, written to configured outputs, webhook fired
 
-## Key Design Patterns
+## Anti-Detection
 
-- **Browser + HTTP hybrid**: Chrome discovers links by scrolling; HTTP workers (parallel=5) fetch pages
-- **AsyncQueueResult**: Browser pushes links as discovered; HTTP workers consume concurrently
-- **Botasaurus decorators**: `@browser`, `@request`, `@task` handle parallelism, caching, retry
-- **Dynamic UI forms**: JS definitions in `inputs/` → auto-generated form fields via botasaurus-controls
-
-## Commands
-
-```bash
-python run.py              # Start the server
-python run.py install      # Build/install step (used in Docker)
-```
+- Proxy rotation (HTTP/HTTPS/SOCKS5) with geo-matching
+- Hardened selectors (aria-label/role-based, text-content fallbacks)
+- Behavioral mimicry (randomized delays, jittered timeouts)
+- User-agent rotation (12+ current Chrome UAs)
+- httpx with HTTP/2 (defeats TLS fingerprinting)
 
 ## Tech Stack
 
-- Python 3, Botasaurus (>=4.0.58), botasaurus-server (>=4.0.56)
-- lxml, regex, dateutils, unidecode, requests
-- Docker with Chrome (shm_size 800m required)
-- External: RapidAPI Website Social Scraper (optional, for enrichment)
+- Python 3.12+, Botasaurus >=4.0.97, botasaurus-server >=4.0.61
+- httpx (HTTP/2), lxml, regex, APScheduler, rich
+- Optional: psycopg2, gspread, boto3, anthropic, openai

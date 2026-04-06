@@ -4,7 +4,14 @@ Core Google Maps scraping engine.
 Uses a browser+HTTP hybrid approach:
 - Headless Chrome scrolls Google Maps to discover place links
 - Parallel HTTP requests fetch individual place pages (much faster)
+
+Anti-detection features:
+- Proxy rotation support
+- Hardened selectors (aria-label/role-based, text-content fallbacks)
+- Behavioral mimicry (randomized scroll delays, timing jitter)
+- User-agent rotation
 """
+import random
 import traceback
 import urllib.parse
 from time import sleep, time
@@ -15,6 +22,7 @@ from botasaurus.cache import DontCache
 from botasaurus.request import request
 
 from .extract import extract_data, extract_possible_map_link
+from backend.proxy import proxy_manager, get_random_ua
 
 
 class StuckInGmapsException(Exception):
@@ -78,8 +86,66 @@ def _retry_on_error(func, error_types, retries=3, wait_time=None, on_exhausted=N
                 raise
 
 
+def _human_delay(min_s=0.5, max_s=2.0):
+    """Sleep for a random human-like interval."""
+    sleep(random.uniform(min_s, max_s))
+
+
 def _get_lang(data):
     return data["lang"]
+
+
+def _get_proxy(data):
+    """Get proxy for Botasaurus decorators."""
+    return proxy_manager.get_proxy()
+
+
+# --- Hardened sponsored link detection ---
+# Uses text-content heuristic instead of brittle CSS classes.
+SPONSORED_LINKS_JS = """
+function get_sponsored_links() {
+    try {
+        const results = [];
+        // Strategy 1: Find elements with "Sponsored" or "Ad" text
+        const allElements = document.querySelectorAll('[role="feed"] a[href*="/maps/place/"]');
+        for (const a of allElements) {
+            const parent = a.closest('[class]');
+            if (!parent) continue;
+            // Walk up to find any sibling/child with ad indicator text
+            const container = parent.parentElement;
+            if (!container) continue;
+            const text = container.innerText || '';
+            if (/\\b(Sponsored|Ad|Ads)\\b/i.test(text)) {
+                results.push(a.href);
+            }
+        }
+        // Strategy 2: Fallback — look for aria-label containing "Sponsored"
+        const sponsored = document.querySelectorAll('[aria-label*="Sponsored"], [aria-label*="sponsored"]');
+        for (const el of sponsored) {
+            const link = el.querySelector('a[href*="/maps/place/"]') || el.closest('a[href*="/maps/place/"]');
+            if (link) results.push(link.href);
+        }
+        return [...new Set(results)];
+    } catch (e) {
+        return [];
+    }
+}
+return get_sponsored_links();
+"""
+
+# Hardened end-of-results detection JS
+END_OF_RESULTS_JS = """
+function check_end_of_list() {
+    // Strategy 1: Look for "You've reached the end of the list" text
+    const body = document.body.innerText || '';
+    if (/reached the end of the list/i.test(body)) return true;
+    if (/no more results/i.test(body)) return true;
+    // Strategy 2: Check for the end-marker span (fallback)
+    const markers = document.querySelectorAll('p.fontBodyMedium > span > span');
+    return markers.length > 0;
+}
+return check_end_of_list();
+"""
 
 
 @request(
@@ -94,7 +160,7 @@ def scrape_place(requests, link, metadata):
     """Fetch a single place page via HTTP and extract data."""
     cookies = metadata["cookies"]
     os_name = metadata["os"]
-    user_agent = metadata["user_agent"]
+    user_agent = metadata.get("user_agent") or get_random_ua()
 
     html = requests.get(
         link,
@@ -152,24 +218,14 @@ def scrape_places(driver: Driver, data):
     def get_sponsored_links():
         nonlocal sponsored_links
         if sponsored_links is None:
-            sponsored_links = driver.run_js("""
-                function get_sponsored_links() {
-                    try {
-                        const els = [...document.querySelectorAll('.kpih0e.f8ia3c.uvopNe')];
-                        const divs = els.map(el => el.closest('.Nv2PK'));
-                        return divs.map(div => div.querySelector('a').href);
-                    } catch (e) {
-                        return [];
-                    }
-                }
-                return get_sponsored_links();
-            """)
+            sponsored_links = driver.run_js(SPONSORED_LINKS_JS)
         return sponsored_links
 
     def scroll_and_collect():
         """Scroll the results feed and push discovered links to the queue."""
         start_time = time()
-        WAIT_TIME = 40
+        base_wait = 40
+        WAIT_TIME = base_wait + random.uniform(-5, 10)  # Jittered timeout
 
         meta = {
             "cookies": driver.get_cookies_dict(),
@@ -196,37 +252,40 @@ def scrape_places(driver: Driver, data):
                 return
 
             feed.scroll_to_bottom()
+            _human_delay(0.3, 1.5)  # Behavioral mimicry
+
+            # Extract links — use ARIA-based selector, filter for Maps place URLs
+            raw_links = driver.get_all_links(
+                '[role="feed"] > div > div > a', wait=Wait.LONG
+            )
+            # Filter to only Google Maps place links
+            place_links = [l for l in raw_links if "/maps/place/" in l]
 
             if max_results is None:
-                links = driver.get_all_links(
-                    '[role="feed"] > div > div > a', wait=Wait.LONG
-                )
+                links = place_links
             else:
-                links = unique_strings(
-                    driver.get_all_links(
-                        '[role="feed"] > div > div > a', wait=Wait.LONG
-                    )
-                )[:max_results]
+                links = unique_strings(place_links)[:max_results]
 
             place_queue.put(links, metadata=meta)
 
             if max_results is not None and len(links) >= max_results:
                 return
 
-            end_el = driver.select("p.fontBodyMedium > span > span", Wait.SHORT)
-            if end_el is not None:
+            # Hardened end-of-results check via JS (text-content based)
+            is_end = driver.run_js(END_OF_RESULTS_JS)
+            if is_end:
                 return
 
             elapsed = time() - start_time
             if elapsed > WAIT_TIME:
                 print("Google Maps stuck scrolling. Retrying after a minute.")
-                sleep(63)
+                sleep(random.uniform(55, 70))  # Jittered retry wait
                 raise StuckInGmapsException()
 
             if driver.can_scroll_further('[role="feed"]'):
                 start_time = time()
             else:
-                sleep(0.1)
+                _human_delay(0.1, 0.4)
 
     search_link = create_search_link(
         query, data["lang"], data["geo_coordinates"], data["zoom"]

@@ -11,11 +11,12 @@ import urllib.parse
 from datetime import datetime
 
 import regex as re
-import requests
+import httpx
 from lxml import html
 
 from .time_utils import parse_relative_date
 from botasaurus.request import request
+from backend.proxy import proxy_manager, get_random_ua
 
 SORT_OPTIONS = {
     "most_relevant": "qualityScore",
@@ -33,13 +34,14 @@ class GoogleMapsAPIScraper:
     """Scrapes reviews from Google Maps' internal API endpoints."""
 
     def __init__(self):
-        self._session = requests.Session()
+        proxy_dict = proxy_manager.get_proxy_dict()
+        self._session = httpx.Client(
+            http2=True,
+            timeout=30.0,
+            proxy=proxy_dict.get("https://") if proxy_dict else None,
+        )
         self._headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": get_random_ua(),
         }
 
     def __enter__(self):
@@ -52,7 +54,7 @@ class GoogleMapsAPIScraper:
         """Make a request with retry logic."""
         for attempt in range(retries):
             try:
-                resp = self._session.get(url, headers=self._headers, timeout=30)
+                resp = self._session.get(url, headers=self._headers)
                 if resp.status_code == 200:
                     return resp.text
                 if resp.status_code == 429:

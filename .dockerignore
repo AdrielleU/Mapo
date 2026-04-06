@@ -12,3 +12,6 @@ local_storage.json
 db.sqlite3
 .env
 .git/
+env/
+data/
+*.db

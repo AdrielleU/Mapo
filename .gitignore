@@ -3,6 +3,7 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+env/
 .env
 profiles/
 output/
@@ -13,3 +14,5 @@ local_storage.json
 db.sqlite3
 .DS_Store
 .history/
+data/
+*.db

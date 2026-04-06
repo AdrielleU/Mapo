@@ -1,13 +1,11 @@
 """
 Social media contact scraper.
 
-Calls an external API to get social media profiles, emails, and phone numbers
-for business websites found on Google Maps.
+Uses the pluggable enrichment system to get social media profiles, emails,
+and phone numbers for business websites found on Google Maps.
 """
 import traceback
-from time import sleep
 
-import requests as http
 from botasaurus.cache import DontCache
 from botasaurus.task import task
 
@@ -15,52 +13,30 @@ FAILED_DUE_TO_CREDITS_EXHAUSTED = "FAILED_DUE_TO_CREDITS_EXHAUSTED"
 FAILED_DUE_TO_NOT_SUBSCRIBED = "FAILED_DUE_TO_NOT_SUBSCRIBED"
 FAILED_DUE_TO_UNKNOWN_ERROR = "FAILED_DUE_TO_UNKNOWN_ERROR"
 
-API_URL = "https://website-social-scraper-api.p.rapidapi.com/contacts"
-API_HOST = "website-social-scraper-api.p.rapidapi.com"
-
 SOCIAL_FIELDS = [
     "emails", "phones", "linkedin", "twitter", "facebook",
     "youtube", "instagram", "tiktok", "github", "snapchat", "pinterest",
 ]
 
 
-def _make_social_request(website, api_key, retry_count=3):
-    """Call the social scraper API with retry logic for rate limiting."""
-    if retry_count == 0:
-        print(f"Failed to get social details for {website} after 3 retries")
-        return DontCache(None)
-
-    headers = {
-        "X-RapidAPI-Key": api_key,
-        "X-RapidAPI-Host": API_HOST,
-    }
+def _enrich_website(website, api_key):
+    """Call the configured enrichment provider for a website."""
+    from backend.enrichment import get_provider
 
     try:
-        response = http.get(API_URL, headers=headers, params={"website": website})
-        data = response.json()
-    except Exception:
+        provider = get_provider(api_key_override=api_key)
+        result = provider.enrich(website)
+        return {"data": result, "error": None}
+    except Exception as e:
+        error_msg = str(e)
         traceback.print_exc()
+
+        if "quota" in error_msg.lower() or "credit" in error_msg.lower():
+            return DontCache({"data": None, "error": FAILED_DUE_TO_CREDITS_EXHAUSTED})
+        if "not subscribed" in error_msg.lower():
+            return DontCache({"data": None, "error": FAILED_DUE_TO_NOT_SUBSCRIBED})
+
         return DontCache({"data": None, "error": FAILED_DUE_TO_UNKNOWN_ERROR})
-
-    if response.status_code == 200:
-        if "pinterest" not in data:
-            data["pinterest"] = None
-        return {"data": data, "error": None}
-
-    message = data.get("message", "")
-
-    if "exceeded the MONTHLY quota" in message:
-        return DontCache({"data": None, "error": FAILED_DUE_TO_CREDITS_EXHAUSTED})
-
-    if "exceeded the rate limit" in message or "many requests" in message:
-        sleep(2)
-        return _make_social_request(website, api_key, retry_count - 1)
-
-    if "You are not subscribed to this API." in message:
-        return DontCache({"data": None, "error": FAILED_DUE_TO_NOT_SUBSCRIBED})
-
-    print(f"Error: {response.status_code}", data)
-    return DontCache({"data": None, "error": FAILED_DUE_TO_UNKNOWN_ERROR})
 
 
 @task(
@@ -72,7 +48,7 @@ def _make_social_request(website, api_key, retry_count=3):
 )
 def get_website_contacts(data, metadata):
     """Fetch social/contact info for a single website URL."""
-    return _make_social_request(data, metadata)
+    return _enrich_website(data, metadata)
 
 
 @task(

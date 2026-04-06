@@ -177,6 +177,10 @@ SOCIAL_MEDIA_KEYS = [
     "youtube", "instagram", "pinterest", "github", "snapchat", "tiktok",
 ]
 
+DETECTION_KEYS = [
+    "technologies", "cms", "ad_pixels", "has_contact_form", "form_provider",
+]
+
 OUTPUT_FIELDS = [
     "place_id", "name", "description", "is_spending_on_ads", "reviews",
     "competitors", "website", "can_claim",
@@ -188,6 +192,9 @@ OUTPUT_FIELDS = [
     "coordinates", "plus_code", "detailed_address", "time_zone", "cid",
     "data_id", "about", "images", "hours", "most_popular_times",
     "popular_times", "menu", "reservations", "order_online_links",
+] + DETECTION_KEYS + [
+    "lead_score", "pitch_summary",
+    "review_sentiment", "review_themes",
     "featured_reviews", "detailed_reviews", "query",
 ]
 
@@ -486,3 +493,13 @@ Server.configure(
         "link": "#",
     },
 )
+
+
+# ---------------------------------------------------------------------------
+# Register REST API routes
+# ---------------------------------------------------------------------------
+try:
+    from backend.api import register_routes
+    register_routes()
+except Exception as e:
+    print(f"[Mapo] Warning: Could not register REST API routes: {e}")

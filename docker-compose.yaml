@@ -6,6 +6,31 @@ services:
     shm_size: 800m
     volumes:
       - .:/app
+      - ./data:/app/data
+      - ./mapo.yaml:/app/mapo.yaml:ro
     ports:
       - "3000:3000"
       - "8000:8000"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/v1/health', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Optional: PostgreSQL for output target
+  # postgres:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_DB: mapo
+  #     POSTGRES_USER: mapo
+  #     POSTGRES_PASSWORD: mapo
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+
+# volumes:
+#   pgdata:
