@@ -36,6 +36,7 @@ from backend.scrapers.filters import filter_places, sort_dict_by_keys
 from backend.data.countries import get_cities
 from backend.utils import remove_nones, extract_path
 from backend.progress import JobProgress
+from backend.config import config
 
 # ---------------------------------------------------------------------------
 # FastAPI application
@@ -321,6 +322,58 @@ async def _broadcast(job_id: str, message: dict):
 
 
 # ---------------------------------------------------------------------------
+# Auto-export + webhook helpers
+# ---------------------------------------------------------------------------
+
+def _auto_export(job_id: str, results: list[dict]):
+    """Auto-save results as CSV + JSON to data/exports/ on completion."""
+    if not results:
+        return
+    export_dir = os.path.join("data", "exports")
+    os.makedirs(export_dir, exist_ok=True)
+
+    # CSV
+    try:
+        csv_path = os.path.join(export_dir, f"mapo_{job_id}.csv")
+        fieldnames = list(results[0].keys())
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for row in results:
+                flat = {}
+                for k, v in row.items():
+                    flat[k] = json.dumps(v) if isinstance(v, (list, dict)) else v
+                writer.writerow(flat)
+    except Exception as e:
+        print(f"[Mapo] Auto-export CSV failed: {e}")
+
+    # JSON
+    try:
+        json_path = os.path.join(export_dir, f"mapo_{job_id}.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"[Mapo] Auto-export JSON failed: {e}")
+
+
+def _fire_webhook(job_id: str, event_type: str, result_count: int):
+    """Fire webhook notification if configured."""
+    try:
+        from backend.webhooks import webhook_manager
+        if webhook_manager and config.webhooks.enabled:
+            job = _jobs.get(job_id, {})
+            payload = {
+                "job_id": job_id,
+                "query": job.get("params", {}).get("query", ""),
+                "result_count": result_count,
+                "timestamp": time.time(),
+            }
+            webhook_manager.send_webhook(event_type, payload)
+    except Exception as e:
+        print(f"[Mapo] Webhook failed: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
 
@@ -377,7 +430,9 @@ async def run_pipeline(job_id: str, params: dict):
 
             progress.completed_queries += 1
             progress.places_scraped = len(all_places)
+            job["results"] = all_places  # Incremental save — data survives crashes
             job["updated_at"] = time.time()
+            _save_job(job_id)
             await _broadcast(job_id, {"type": "progress", **progress.to_dict()})
 
         # -- social enrichment ----------------------------------------------
@@ -427,6 +482,12 @@ async def run_pipeline(job_id: str, params: dict):
         job["updated_at"] = time.time()
         _save_job(job_id)
 
+        # Auto-export CSV to data/exports/
+        _auto_export(job_id, results)
+
+        # Fire webhook if configured
+        _fire_webhook(job_id, "task.completed", len(results))
+
         await _broadcast(job_id, {
             "type": "completed",
             "total_results": len(results),
@@ -444,6 +505,10 @@ async def run_pipeline(job_id: str, params: dict):
         job["error"] = str(exc)
         job["updated_at"] = time.time()
         _save_job(job_id)
+        _fire_webhook(job_id, "task.failed", len(job.get("results", [])))
+        # Auto-export whatever we got before failure
+        if job.get("results"):
+            _auto_export(job_id, job["results"])
         await _broadcast(job_id, {"type": "error", "error": str(exc)})
 
 
