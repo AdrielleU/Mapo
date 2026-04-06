@@ -85,9 +85,12 @@ class OutputConfig:
 @dataclass
 class AIConfig:
     enabled: bool = False
-    provider: str = "anthropic"  # anthropic, openai
+    provider: str = "anthropic"  # anthropic, openai, gemini, vllm
     api_key: str = ""
     model: str = ""
+    base_url: str = ""  # For vLLM: http://localhost:8001/v1
+    icp: str = ""  # Ideal Customer Profile definition
+    product_description: str = ""  # What you're selling
 
     @classmethod
     def from_dict(cls, d: dict) -> "AIConfig":
@@ -96,6 +99,9 @@ class AIConfig:
             provider=d.get("provider", "anthropic"),
             api_key=d.get("api_key", ""),
             model=d.get("model", ""),
+            base_url=d.get("base_url", ""),
+            icp=d.get("icp", ""),
+            product_description=d.get("product_description", ""),
         )
 
 
@@ -147,6 +153,12 @@ def _apply_env_overrides(cfg: MapoConfig) -> MapoConfig:
         cfg.ai.api_key = os.environ["MAPO_AI_API_KEY"]
     if os.environ.get("MAPO_AI_MODEL"):
         cfg.ai.model = os.environ["MAPO_AI_MODEL"]
+    if os.environ.get("MAPO_AI_BASE_URL"):
+        cfg.ai.base_url = os.environ["MAPO_AI_BASE_URL"]
+    if os.environ.get("MAPO_AI_ICP"):
+        cfg.ai.icp = os.environ["MAPO_AI_ICP"]
+    if os.environ.get("MAPO_AI_PRODUCT"):
+        cfg.ai.product_description = os.environ["MAPO_AI_PRODUCT"]
 
     return cfg
 

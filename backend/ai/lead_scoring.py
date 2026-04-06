@@ -1,8 +1,8 @@
 """
-AI-powered lead scoring for scraped places.
+AI-powered lead scoring with ICP (Ideal Customer Profile) support.
 
-Sends place data to an LLM and returns a structured lead assessment
-including a numeric score, pitch summary, and suggested approach.
+Sends place data + your ICP definition to an LLM and returns a structured
+lead assessment: score, pitch summary, approach, and ICP match reasoning.
 """
 import json
 import logging
@@ -11,48 +11,62 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Rate-limiting: minimum seconds between API calls
 _MIN_CALL_INTERVAL = 1.0
 _last_call_time: float = 0.0
 
 
 SYSTEM_PROMPT = """\
-You are a B2B lead qualification expert. Analyze the business data provided
-and return a JSON object with exactly these keys:
+You are a B2B lead qualification expert. Analyze the business data and score it
+as a potential lead. If an Ideal Customer Profile (ICP) is provided, score
+specifically against that ICP.
 
-- "lead_score": integer 1-10 (10 = best lead)
-- "pitch_summary": a 1-2 sentence tailored pitch for this business
+Return a JSON object with exactly these keys:
+
+- "lead_score": integer 1-10 (10 = perfect ICP match, best lead)
+- "icp_match": one of "strong", "moderate", "weak", "no_match"
+- "pitch_summary": a 1-2 sentence tailored pitch for this specific business
 - "suggested_approach": one of "cold_call", "cold_email", "linkedin", "in_person", "skip"
-- "reasoning": brief explanation of why you scored it this way
+- "reasoning": brief explanation of the score and ICP match
 
 Return ONLY valid JSON, no markdown fences or extra text.
 """
 
 
-def _build_user_prompt(place: dict, product_description: str = "") -> str:
-    """Build the user prompt from place data and optional product description."""
-    parts = ["Analyze this business as a potential B2B lead:\n"]
+def _build_user_prompt(place: dict, product_description: str = "", icp: str = "") -> str:
+    """Build the user prompt from place data, product, and ICP."""
+    parts = ["Analyze this business as a potential lead:\n"]
 
     field_map = {
         "name": "Business Name",
-        "category": "Category",
+        "main_category": "Category",
+        "categories": "All Categories",
         "rating": "Rating",
         "reviews": "Review Count",
         "website": "Website",
         "phone": "Phone",
         "address": "Address",
-        "city": "City",
         "description": "Description",
+        "is_spending_on_ads": "Spending on Google Ads",
+        "can_claim": "Unclaimed Listing",
     }
 
     for key, label in field_map.items():
         value = place.get(key)
-        if value:
+        if value is not None and value != "" and value != []:
+            if isinstance(value, list):
+                value = ", ".join(str(v) for v in value)
             parts.append(f"- {label}: {value}")
 
+    if icp:
+        parts.append(f"\n--- IDEAL CUSTOMER PROFILE (ICP) ---\n{icp}")
+        parts.append("Score this business specifically against this ICP.")
+
     if product_description:
-        parts.append(f"\nProduct/Service being sold: {product_description}")
+        parts.append(f"\n--- PRODUCT/SERVICE ---\n{product_description}")
         parts.append("Tailor the pitch specifically for this product/service.")
+
+    if not icp and not product_description:
+        parts.append("\nNo ICP or product specified. Score as a general B2B lead.")
 
     return "\n".join(parts)
 
@@ -60,22 +74,24 @@ def _build_user_prompt(place: dict, product_description: str = "") -> str:
 def score_lead(
     place: dict,
     product_description: str = "",
+    icp: str = "",
 ) -> Optional[dict]:
     """
-    Score a business place as a potential lead using an LLM.
+    Score a business as a potential lead using an LLM.
 
     Args:
         place: Dict with place data (name, category, reviews, rating, website, etc.)
-        product_description: Optional description of the product being pitched.
-                             When provided the LLM tailors the pitch to this product.
+        product_description: What you're selling ("websites for restaurants")
+        icp: Your Ideal Customer Profile definition, e.g.:
+             "Small restaurants with 50-200 reviews, 4+ stars, no website,
+              in major US cities, spending on Google Ads preferred"
 
     Returns:
-        A dict with keys ``lead_score``, ``pitch_summary``,
-        ``suggested_approach``, and ``reasoning``; or ``None`` on failure.
+        Dict with lead_score, icp_match, pitch_summary, suggested_approach,
+        reasoning. Or None on failure.
     """
     global _last_call_time
 
-    # Lazy import to avoid circular dependency and allow graceful failure
     try:
         from backend.ai import get_llm_client
     except ImportError:
@@ -88,7 +104,7 @@ def score_lead(
         logger.warning("Cannot score lead — AI disabled: %s", exc)
         return None
 
-    user_prompt = _build_user_prompt(place, product_description)
+    user_prompt = _build_user_prompt(place, product_description, icp)
 
     # Rate limiting
     elapsed = time.monotonic() - _last_call_time
@@ -99,12 +115,12 @@ def score_lead(
         _last_call_time = time.monotonic()
         raw = client.chat(SYSTEM_PROMPT, user_prompt)
 
-        # Strip markdown fences if the model wraps them anyway
+        # Strip markdown fences if model wraps them
         text = raw.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1] if "\n" in text else text[3:]
         if text.endswith("```"):
-            text = text[: -3]
+            text = text[:-3]
         text = text.strip()
 
         result = json.loads(text)
@@ -117,6 +133,10 @@ def score_lead(
 
         # Clamp lead_score to 1-10
         result["lead_score"] = max(1, min(10, int(result["lead_score"])))
+
+        # Ensure icp_match exists
+        if "icp_match" not in result:
+            result["icp_match"] = "unknown"
 
         return result
 

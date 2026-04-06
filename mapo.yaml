@@ -64,9 +64,24 @@
 #       key_prefix: "scrapes/"
 #       region: "us-east-1"
 
-# --- AI Features ---
+# --- AI Features (Lead Scoring + Review Analysis) ---
 # ai:
 #   enabled: false
-#   provider: anthropic      # anthropic, openai
+#   provider: anthropic      # anthropic, openai, gemini, vllm
 #   api_key: ""
-#   model: ""                # e.g., claude-sonnet-4-20250514, gpt-4o
+#   model: ""                # e.g., claude-sonnet-4-20250514, gpt-4o, gemini-2.0-flash
+#   base_url: ""             # For vLLM: http://localhost:8001/v1
+#
+#   # Ideal Customer Profile — define your target customer once,
+#   # every lead gets scored against it:
+#   icp: |
+#     Small restaurants with 50-200 reviews, 4+ stars rating,
+#     no website or basic website, in major US cities.
+#     Prefer businesses spending on Google Ads (indicates ad budget).
+#     Skip chains and franchises.
+#
+#   # What you're selling — used to tailor pitch summaries:
+#   product_description: |
+#     Custom websites for restaurants with online ordering,
+#     SEO optimization, and Google Ads management.
+#     Starting at $1,500 + $40/month hosting.
