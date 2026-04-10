@@ -8,6 +8,7 @@ Scrape Google Maps business data, enrich with contacts, score with AI, deduplica
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED)
+[![GHCR](https://img.shields.io/badge/ghcr.io-adrielleu%2Fmapo-blue?logo=docker)](https://github.com/AdrielleU/Mapo/pkgs/container/mapo)
 
 ---
 
@@ -171,6 +172,51 @@ Mapo handles the first step. Everything else is your existing tool stack.
 ---
 
 ## Quick Start
+
+### Option A: Run the pre-built image (fastest, no clone needed)
+
+```bash
+docker run -d --name mapo -p 8000:8000 \
+  -v $(pwd)/data:/app/data \
+  ghcr.io/adrielleu/mapo:latest
+```
+
+Open **http://localhost:8000**. That's it.
+
+**Pin to a specific version** for production:
+
+```bash
+docker run -d --name mapo -p 8000:8000 \
+  -v $(pwd)/data:/app/data \
+  ghcr.io/adrielleu/mapo:v1.0.0
+```
+
+Available tags: `latest`, `v1.0.0`, `1.0`, `1`, plus per-commit SHA tags. Browse them at the [GHCR package page](https://github.com/AdrielleU/Mapo/pkgs/container/mapo).
+
+**With env vars** (auth, AI, enrichment, etc.):
+
+```bash
+docker run -d --name mapo -p 8000:8000 \
+  -v $(pwd)/data:/app/data \
+  --env-file .env \
+  ghcr.io/adrielleu/mapo:v1.0.0
+```
+
+**Upgrade later:**
+
+```bash
+docker pull ghcr.io/adrielleu/mapo:latest
+docker stop mapo && docker rm mapo
+# re-run the docker run command above
+```
+
+**Rollback to a known-good version** — just change the tag and re-run. Your `./data` volume is preserved.
+
+---
+
+### Option B: Build from source
+
+For development, customization, or building your own image. Same end result as Option A.
 
 ### 1. Clone and configure
 
