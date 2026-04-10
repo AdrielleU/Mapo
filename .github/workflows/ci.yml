@@ -131,6 +131,17 @@ jobs:
       - name: Test image starts
         run: |
           docker run --rm -d --name mapo-test -p 8000:8000 mapo:test
-          sleep 10
-          curl -f http://localhost:8000/api/v1/health || (docker logs mapo-test && exit 1)
+          # Wait up to 60s for the health endpoint
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            if curl -sf http://localhost:8000/api/v1/health > /dev/null; then
+              echo "✓ Mapo is healthy"
+              docker stop mapo-test
+              exit 0
+            fi
+            echo "Waiting for Mapo to start... ($i/12)"
+            sleep 5
+          done
+          echo "✗ Mapo failed to become healthy"
+          docker logs mapo-test
           docker stop mapo-test
+          exit 1

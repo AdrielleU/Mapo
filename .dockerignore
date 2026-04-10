@@ -13,5 +13,10 @@ db.sqlite3
 .env
 .git/
 env/
-data/
+# Anchor to root (/) — only excludes top-level data/, not backend/data/
+/data/
 *.db
+# Tests don't need to be in the image
+tests/
+.github/
+.pytest_cache/

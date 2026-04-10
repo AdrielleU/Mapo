@@ -2,10 +2,19 @@ FROM python:3.12-slim
 
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
 
-# System deps for Playwright/Camoufox
+# System deps for both Camoufox (Firefox) AND Patchright (Chromium)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgtk-3-0 libxcursor1 libasound2 libdbus-glib-1-2 \
+    # Firefox/Camoufox deps
+    libgtk-3-0 libdbus-glib-1-2 libxt6 \
+    # Chromium/Patchright deps
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libpango-1.0-0 libcairo2 \
+    # Shared deps
+    libxcursor1 libasound2 libx11-6 libx11-xcb1 libxext6 libxi6 libxcb1 \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
