@@ -13,8 +13,11 @@ db.sqlite3
 .env
 .git/
 env/
-# Anchor to root (/) — only excludes top-level data/, not backend/data/
-/data/
+# Exclude top-level data/ (runtime jobs, exports, settings)
+# but RE-INCLUDE backend/data/ since those are Python modules (countries, states, categories)
+data
+!backend/data
+!backend/data/**
 *.db
 # Tests don't need to be in the image
 tests/
