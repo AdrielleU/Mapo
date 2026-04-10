@@ -1,0 +1,39 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+exclude = [
+    "venv",
+    ".venv",
+    "frontend",
+    "data",
+    "scripts/generate_frontend_data.py",  # auto-generated
+]
+
+[tool.ruff.lint]
+# Start permissive — only flag real bugs and security issues
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "B",   # bugbear (likely bugs)
+    "UP",  # pyupgrade (modern Python idioms)
+]
+ignore = [
+    "E501",  # line too long (we have 120 max but allow longer for URLs)
+    "B008",  # function call in default arg (FastAPI uses this pattern)
+    "B904",  # raise from inside except (lots of legit cases)
+    "E402",  # module-level import not at top (some lazy imports are intentional)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F841", "E712"]  # tests can have unused vars and == True patterns
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"

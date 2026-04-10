@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Cancel in-progress runs when a new commit is pushed to the same branch
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ----------------------------------------------------------------------
+  # Lint + format check (fast — runs first)
+  # ----------------------------------------------------------------------
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff check (lint)
+        run: ruff check backend/ scripts/
+
+      - name: Run ruff format check
+        run: ruff format --check backend/ scripts/
+
+  # ----------------------------------------------------------------------
+  # Tests
+  # ----------------------------------------------------------------------
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+
+      - name: Verify imports
+        run: |
+          python -c "from backend.server import app; print('OK')"
+          python -c "from backend.scrapers.places import scrape_places; print('OK')"
+          python -c "from backend.scrapers.filters import filter_places, load_existing_keys; print('OK')"
+          python -c "from backend.notifications import send_notification, detect_provider; print('OK')"
+
+      - name: Generate frontend data
+        run: python scripts/generate_frontend_data.py
+
+      - name: Run pytest
+        run: pytest tests/ -v --tb=short
+
+  # ----------------------------------------------------------------------
+  # Security scan
+  # ----------------------------------------------------------------------
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit dependencies
+        run: pip-audit -r requirements.txt --strict || echo "pip-audit found issues (non-blocking)"
+        continue-on-error: true
+
+      - name: Run bandit (security linter)
+        run: |
+          pip install bandit
+          bandit -r backend/ -ll -q || echo "bandit found issues (non-blocking)"
+        continue-on-error: true
+
+  # ----------------------------------------------------------------------
+  # Docker build (verify the image still builds)
+  # ----------------------------------------------------------------------
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: mapo:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test image starts
+        run: |
+          docker run --rm -d --name mapo-test -p 8000:8000 mapo:test
+          sleep 10
+          curl -f http://localhost:8000/api/v1/health || (docker logs mapo-test && exit 1)
+          docker stop mapo-test
