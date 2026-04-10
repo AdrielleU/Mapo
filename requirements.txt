@@ -4,7 +4,7 @@
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
 pydantic==2.10.6
-websockets==14.2
+websockets==16.0
 
 # Browser automation + anti-detection
 camoufox[geoip]>=0.4.0               # Anti-detection Firefox (default)
