@@ -9,7 +9,11 @@ Anti-detection: Camoufox fingerprinting, proxy rotation, behavioral mimicry,
 hardened aria-label/text-based selectors, randomized delays.
 """
 import asyncio
+import html as htmlmod
+import json
+import math
 import random
+import re
 import traceback
 import urllib.parse
 from time import time
@@ -20,6 +24,7 @@ from .extract import extract_data, extract_possible_map_link
 from backend.proxy import proxy_manager, get_random_ua
 from backend.utils import extract_path, remove_nones
 from backend import cache
+from backend.config import config
 
 
 class StuckInGmapsException(Exception):
@@ -35,13 +40,43 @@ def unique_strings(lst):
     return list(dict.fromkeys(lst))
 
 
-def create_search_link(query, lang, geo_coordinates, zoom):
-    """Build a Google Maps search URL."""
+def _split_app_state(page_html):
+    """Extract the APP_INITIALIZATION_STATE JSON string from a Maps HTML page."""
+    init_state = page_html.split(";window.APP_INITIALIZATION_STATE=")[1]
+    return init_state.split(";window.APP_FLAGS")[0]
+
+
+def radius_to_zoom(radius_meters: float, latitude: float = 0.0) -> float:
+    """Convert a search radius in meters to a Google Maps zoom level.
+
+    Uses the Web Mercator formula. Clamped to range [1, 21].
+    """
+    if radius_meters <= 0:
+        return config.scraping.default_zoom
+    lat_rad = math.radians(latitude)
+    zoom = math.log2(156543.0 * math.cos(lat_rad) / (radius_meters / 256.0))
+    return max(1.0, min(21.0, round(zoom, 1)))
+
+
+def create_search_link(query, lang, geo_coordinates, zoom, radius_meters=None):
+    """Build a Google Maps search URL.
+
+    If *radius_meters* is provided and geo_coordinates are set, the radius
+    is converted to a zoom level which overrides the *zoom* parameter.
+    """
     endpoint = urllib.parse.quote_plus(query)
 
     params = {"authuser": "0", "entry": "ttu"}
     if lang:
         params["hl"] = lang
+
+    # Convert radius to zoom if provided
+    if radius_meters and geo_coordinates:
+        try:
+            lat = float(geo_coordinates.replace(" ", "").split(",")[0])
+            zoom = radius_to_zoom(radius_meters, lat)
+        except (ValueError, IndexError):
+            pass
 
     geo_str = ""
     if geo_coordinates:
@@ -58,8 +93,10 @@ def create_search_link(query, lang, geo_coordinates, zoom):
     return url
 
 
-async def _human_delay(min_s=0.5, max_s=2.0):
+async def _human_delay(min_s=None, max_s=None):
     """Sleep for a random human-like interval."""
+    min_s = min_s if min_s is not None else config.scraping.min_delay
+    max_s = max_s if max_s is not None else config.scraping.max_delay
     await asyncio.sleep(random.uniform(min_s, max_s))
 
 
@@ -151,21 +188,50 @@ async def scrape_place(link, cookies, user_agent, proxy=None):
         for attempt in range(5):
             try:
                 resp = await client.get(link, headers=headers, cookies=cookie_dict)
-                html = resp.text
+                page_html = resp.text
+                data = None
 
-                init_state = html.split(";window.APP_INITIALIZATION_STATE=")[1]
-                app_state = init_state.split(";window.APP_FLAGS")[0]
+                # Strategy 1: fetch from /maps/preview/place endpoint (full data)
+                preview_match = re.search(r'(/maps/preview/place\?[^"]+)', page_html)
+                if preview_match:
+                    try:
+                        preview_path = htmlmod.unescape(preview_match.group(1))
+                        preview_url = "https://www.google.com" + preview_path
+                        resp2 = await client.get(preview_url, headers=headers, cookies=cookie_dict)
+                        raw = resp2.text
+                        if raw.startswith(")]}'"):
+                            raw = raw[5:]
+                        data = extract_data(raw, link)
+                    except Exception:
+                        data = None  # fall through to next strategy
 
-                data = extract_data(app_state, link)
-                data["is_spending_on_ads"] = False
-                cache.put(link, data)
-                return data
+                # Strategy 2: parse APP_INITIALIZATION_STATE (old format)
+                if data is None and ";window.APP_INITIALIZATION_STATE=" in page_html:
+                    try:
+                        data = extract_data(_split_app_state(page_html), link)
+                    except Exception:
+                        data = None
 
-            except (IndexError, AttributeError):
+                # Strategy 3: extract minimal data from [3][5] embedded string
+                if data is None and ";window.APP_INITIALIZATION_STATE=" in page_html:
+                    try:
+                        data = _extract_minimal_from_init_state(page_html, link)
+                    except Exception:
+                        data = None
+
+                if data is not None:
+                    data["is_spending_on_ads"] = False
+                    cache.put(link, data)
+                    return data
+
+                # No strategy worked on this attempt
                 if attempt < 4:
                     await asyncio.sleep(2 * (attempt + 1))
                     continue
-                raise RetryException(f"Failed to extract data from {link} after 5 attempts")
+
+                print(f"[Mapo] Skipping place (no data after 5 attempts): {link[:80]}")
+                return None
+
             except Exception:
                 if attempt < 4:
                     await asyncio.sleep(2 * (attempt + 1))
@@ -174,24 +240,108 @@ async def scrape_place(link, cookies, user_agent, proxy=None):
                 return None
 
 
+def _extract_minimal_from_init_state(page_html, link):
+    """Extract minimal place data from APP_INITIALIZATION_STATE [3][5].
+
+    Google now lazy-loads detailed data, but [3][5] still contains:
+    name, coordinates, place_id. Returns a dict with whatever is available.
+    """
+    parsed = json.loads(_split_app_state(page_html))
+
+    raw = parsed[3][5]
+    prefix = ")]}'"
+    if raw.startswith(prefix):
+        raw = raw[len(prefix) + 1:]
+
+    inner = _json.loads(raw)
+    place = inner[0] if inner else None
+    if not place or not isinstance(place, list):
+        return None
+
+    # Extract what's available
+    data = {
+        "place_id": place[14][0][4] if len(place) > 14 and place[14] else None,
+        "name": place[1] if len(place) > 1 else None,
+        "description": None,
+        "main_category": None,
+        "categories": [],
+        "rating": None,
+        "reviews": 0,
+        "price_range": None,
+        "status": "operational",
+        "phone": None,
+        "phone_international": None,
+        "website": None,
+        "address": None,
+        "detailed_address": {},
+        "coordinates": f"{place[3][2]},{place[3][3]}" if len(place) > 3 and place[3] and place[3][2] else None,
+        "link": link,
+        "is_spending_on_ads": False,
+        "is_temporarily_closed": False,
+        "is_permanently_closed": False,
+    }
+
+    if not data["name"]:
+        return None
+
+    return data
+
+
 def _extract_map_link_from_html(html):
     """Try to extract a single place link from search results HTML."""
     try:
-        init_state = html.split(";window.APP_INITIALIZATION_STATE=")[1]
-        app_state = init_state.split(";window.APP_FLAGS")[0]
-        link = extract_possible_map_link(app_state)
+        link = extract_possible_map_link(_split_app_state(html))
         if link and extract_path(link).startswith("/maps/place"):
             return link
     except Exception:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Browser launchers (pluggable backends)
+# ---------------------------------------------------------------------------
+
+async def _launch_camoufox(proxy_url):
+    """Launch Camoufox (anti-detection Firefox) via AsyncCamoufox context manager."""
+    from camoufox.async_api import AsyncCamoufox
+
+    kwargs = {"headless": config.scraping.headless}
+    if proxy_url:
+        kwargs["proxy"] = {"server": proxy_url}
+
+    # AsyncCamoufox returns a BrowserContext directly
+    ctx_manager = AsyncCamoufox(**kwargs)
+    context = await ctx_manager.__aenter__()
+    page = await context.new_page()
+    # Store the context manager so we can __aexit__ it in cleanup
+    return page, context, ctx_manager, None
+
+
+async def _launch_patchright(proxy_url):
+    """Launch Patchright (anti-detection Chromium)."""
+    from patchright.async_api import async_playwright
+
+    pw = await async_playwright().start()
+    browser = await pw.chromium.launch(
+        headless=config.scraping.headless,
+        proxy={"server": proxy_url} if proxy_url else None,
+    )
+    context = await browser.new_context(
+        locale="en-US",
+        timezone_id="America/New_York",
+        user_agent=get_random_ua(),
+    )
+    page = await context.new_page()
+    return page, context, pw, browser
+
+
 async def scrape_places(data, progress_cb=None):
     """
     Main scraping entry point.
 
-    Scrolls Google Maps search results using Camoufox (anti-detection Firefox),
-    collects place links, then fetches each place page in parallel via httpx.
+    Scrolls Google Maps search results using a stealth browser (CloverLabs
+    Camoufox or Patchright), collects place links, then fetches each place
+    page in parallel via httpx.
 
     Args:
         data: dict with query, max, lang, geo_coordinates, zoom, links
@@ -200,8 +350,6 @@ async def scrape_places(data, progress_cb=None):
     Returns:
         {"query": str, "places": list[dict]}
     """
-    from camoufox.async_api import AsyncNewBrowser
-
     max_results = data["max"]
     query = data["query"]
     direct_links = data.get("links")
@@ -209,19 +357,19 @@ async def scrape_places(data, progress_cb=None):
 
     proxy_url = proxy_manager.get_proxy() if proxy_manager.enabled else None
 
-    async with AsyncNewBrowser(
-        headless=True,
-        proxy={"server": proxy_url} if proxy_url else None,
-    ) as browser:
-        context = await browser.new_context(
-            locale="en-US",
-            timezone_id="America/New_York",
-        )
-        page = await context.new_page()
+    browser_type = config.scraping.browser
+
+    if browser_type == "patchright":
+        page, context, _pw, _browser = await _launch_patchright(proxy_url)
+    else:
+        page, context, _pw, _browser = await _launch_camoufox(proxy_url)
+
+    try:
 
         # Navigate to Google Maps search
         search_link = create_search_link(
-            query, data["lang"], data["geo_coordinates"], data["zoom"]
+            query, data["lang"], data["geo_coordinates"], data["zoom"],
+            radius_meters=data.get("radius_meters"),
         )
         await page.goto(search_link, wait_until="domcontentloaded", timeout=30000)
 
@@ -250,7 +398,30 @@ async def scrape_places(data, progress_cb=None):
         cookies = await context.cookies()
         user_agent = await page.evaluate("() => navigator.userAgent")
 
-        await context.close()
+    finally:
+        # Clean up browser resources
+        # For Camoufox: _pw is the AsyncCamoufox context manager, _browser is None
+        # For Patchright: _pw is the Playwright instance, _browser is the Browser
+        if _pw and hasattr(_pw, '__aexit__'):
+            try:
+                await _pw.__aexit__(None, None, None)
+            except Exception:
+                pass
+        else:
+            try:
+                await context.close()
+            except Exception:
+                pass
+            if _browser:
+                try:
+                    await _browser.close()
+                except Exception:
+                    pass
+            if _pw:
+                try:
+                    await _pw.stop()
+                except Exception:
+                    pass
 
     # --- Fetch each place page in parallel via httpx ---
     if not discovered_links:
@@ -258,7 +429,7 @@ async def scrape_places(data, progress_cb=None):
 
     discovered_links = unique_strings(discovered_links)
 
-    sem = asyncio.Semaphore(5)
+    sem = asyncio.Semaphore(config.scraping.concurrency)
     scraped_count = 0
 
     async def fetch_one(link):
@@ -286,7 +457,7 @@ async def scrape_places(data, progress_cb=None):
 
 async def _scroll_and_collect(page, max_results, start_time):
     """Scroll the Google Maps results feed and collect place links."""
-    WAIT_TIME = 40 + random.uniform(-5, 10)
+    WAIT_TIME = config.scraping.scroll_timeout + random.uniform(-5, 10)
     links = []
 
     try:

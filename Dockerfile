@@ -10,10 +10,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN python -m playwright install firefox
+RUN python -m playwright install firefox chromium
 
 COPY . .
 RUN mkdir -p data
+RUN python scripts/generate_frontend_data.py
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

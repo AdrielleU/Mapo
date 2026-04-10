@@ -2,42 +2,92 @@
 # Copy this file and customize for your deployment.
 # Environment variables override these settings (see .env.example).
 
-# --- Proxy Configuration ---
+# --- Authentication ---
+# Set in .env file (not here — passwords shouldn't be in yaml):
+#   MAPO_USERNAME=admin
+#   MAPO_PASSWORD=changeme
+#   MAPO_TOTP_SECRET=JBSWY3DPEHPK3PXP   # optional MFA
+
+# --- Limits & Safeguards ---
+# Hard caps that prevent runaway jobs. Server enforces these on every request.
+# limits:
+#   max_results_per_query: 5000      # cap on max_results param
+#   max_cities_per_job: 200          # cap on city expansion
+#   max_total_places: 10000          # absolute ceiling per job
+#   max_concurrent_jobs: 3           # how many jobs can run at once
+#   max_runtime_minutes: 120         # auto-cancel after N minutes
+#   warn_threshold: 1000             # UI warning above this estimated total
+
+# --- Scraping Tuning ---
+# scraping:
+#   browser: camoufox            # camoufox (Firefox, default) or patchright (Chromium)
+#   concurrency: 5            # parallel HTTP requests for place pages (1-20)
+#   min_delay: 0.5            # minimum delay between actions (seconds)
+#   max_delay: 2.0            # maximum delay between actions (seconds)
+#   scroll_timeout: 40        # seconds before declaring scroll stuck
+#   headless: true            # false = show browser window (debug mode)
+#   default_zoom: 14          # default map zoom level (1-21)
+
+# --- Proxy ---
 # proxy:
 #   enabled: false
 #   urls:
 #     - "http://user:pass@proxy1.example.com:8080"
 #     - "socks5://user:pass@proxy2.example.com:1080"
-#   rotation: round_robin   # round_robin, random, geo_match
-#   geo_match: false         # match proxy location to search region
+#   rotation: round_robin     # round_robin, random, geo_match
+#   geo_match: false           # match proxy location to search region
 
-# --- Enrichment Provider ---
+# --- Enrichment (emails + social links) ---
 # enrichment:
-#   provider: rapidapi       # rapidapi, hunter, apollo
+#   provider: rapidapi         # rapidapi, hunter, apollo
 #   api_key: ""
+
+# --- AI (lead scoring + review analysis) ---
+# ai:
+#   enabled: false
+#   provider: anthropic        # anthropic, openai, gemini, vllm
+#   api_key: ""
+#   model: ""                  # claude-sonnet-4-20250514, gpt-4o, gemini-2.0-flash
+#   base_url: ""               # vLLM only: http://localhost:8001/v1
+#
+#   # Define your target customer — every lead gets scored against it:
+#   icp: |
+#     Small restaurants with 50-200 reviews, 4+ stars,
+#     no website or basic website, in major US cities.
+#     Prefer businesses spending on Google Ads.
+#     Skip chains and franchises.
+#
+#   # What you're selling — used to tailor pitch summaries:
+#   product_description: |
+#     Custom websites for restaurants with online ordering,
+#     SEO optimization, and Google Ads management.
+#     Starting at $1,500 + $40/month hosting.
 
 # --- Webhooks ---
 # webhooks:
 #   enabled: false
 #   urls:
 #     - "https://hooks.slack.com/services/XXX/YYY/ZZZ"
-#     - "https://your-app.com/webhooks/mapo"
+#     - "https://your-n8n.com/webhook/abc123"
 #   retry_count: 3
+#
+# Per-job webhooks can also be set in the web UI (no config needed).
+# Webhook payload includes full results (up to 500 leads) + download URLs.
 
-# --- Scheduler (Cron Jobs) ---
+# --- Scheduler (cron jobs) ---
 # scheduler:
 #   enabled: false
 #   jobs:
 #     - name: "weekly_restaurants_nyc"
 #       query: "Restaurants in New York"
-#       cron: "0 8 * * 1"         # Every Monday at 8am
+#       cron: "0 8 * * 1"           # Every Monday at 8am
 #       max_results: 500
-#       output_target: csv         # csv, json, postgres, sheets, s3
+#       output_target: csv
 #       output_path: "./data/restaurants_nyc.csv"
 #
 #     - name: "daily_dentists_sf"
 #       query: "Dentists in San Francisco"
-#       cron: "0 6 * * *"         # Every day at 6am
+#       cron: "0 6 * * *"           # Every day at 6am
 #       max_results: 200
 #       output_target: postgres
 
@@ -63,25 +113,3 @@
 #       bucket: "my-mapo-bucket"
 #       key_prefix: "scrapes/"
 #       region: "us-east-1"
-
-# --- AI Features (Lead Scoring + Review Analysis) ---
-# ai:
-#   enabled: false
-#   provider: anthropic      # anthropic, openai, gemini, vllm
-#   api_key: ""
-#   model: ""                # e.g., claude-sonnet-4-20250514, gpt-4o, gemini-2.0-flash
-#   base_url: ""             # For vLLM: http://localhost:8001/v1
-#
-#   # Ideal Customer Profile — define your target customer once,
-#   # every lead gets scored against it:
-#   icp: |
-#     Small restaurants with 50-200 reviews, 4+ stars rating,
-#     no website or basic website, in major US cities.
-#     Prefer businesses spending on Google Ads (indicates ad budget).
-#     Skip chains and franchises.
-#
-#   # What you're selling — used to tailor pitch summaries:
-#   product_description: |
-#     Custom websites for restaurants with online ordering,
-#     SEO optimization, and Google Ads management.
-#     Starting at $1,500 + $40/month hosting.

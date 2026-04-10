@@ -146,3 +146,105 @@ def score_lead(
     except Exception as exc:
         logger.error("Lead scoring API error: %s", exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Email ranking — picks best email for outreach using business + ICP context
+# ---------------------------------------------------------------------------
+
+EMAIL_RANK_SYSTEM_PROMPT = """\
+You are evaluating contact emails for B2B cold outreach. Given a business and a
+list of emails, rank them by outreach quality.
+
+Consider:
+- Domain match: emails on the business's own domain beat Gmail/Yahoo/Outlook
+- Decision-maker indicators: names matching owner, founder, CEO, manager
+- ICP fit: does this person likely match the ideal customer profile?
+- Avoid generics: info@, support@, noreply@, admin@, webmaster@, contact@
+- Personal name patterns (firstname.lastname@) suggest a real person
+
+Return a JSON object with exactly these keys:
+- "best_email": string (the top-ranked email)
+- "best_email_reasoning": brief explanation (1 sentence)
+- "ranked_emails": array of {"email": str, "rank": int, "reason": str}, ordered best to worst
+
+Return ONLY valid JSON, no markdown fences.
+"""
+
+
+def rank_emails_with_ai(
+    emails: list[str],
+    place: dict,
+    icp: str = "",
+    product_description: str = "",
+) -> Optional[dict]:
+    """Use LLM to rank emails by outreach value, considering business + ICP context.
+
+    Only useful when 2+ emails exist. Returns None on failure or single-email lists.
+    """
+    global _last_call_time
+
+    # Filter to valid emails
+    valid_emails = [e for e in emails if e and "@" in str(e)]
+    if len(valid_emails) < 2:
+        return None
+
+    try:
+        from backend.ai import get_llm_client
+    except ImportError:
+        return None
+
+    try:
+        client = get_llm_client()
+    except RuntimeError:
+        return None
+
+    # Build user prompt
+    parts = [f"Business: {place.get('name', 'Unknown')}"]
+    if place.get("main_category"):
+        parts.append(f"Category: {place['main_category']}")
+    if place.get("address"):
+        parts.append(f"Address: {place['address']}")
+    if place.get("website"):
+        parts.append(f"Website: {place['website']}")
+    if place.get("owner"):
+        parts.append(f"Owner: {place['owner']}")
+
+    parts.append("\nEmails to rank:")
+    for i, e in enumerate(valid_emails, 1):
+        parts.append(f"{i}. {e}")
+
+    if icp:
+        parts.append(f"\nIdeal Customer Profile:\n{icp}")
+    if product_description:
+        parts.append(f"\nProduct/Service:\n{product_description}")
+
+    user_prompt = "\n".join(parts)
+
+    # Rate limiting
+    elapsed = time.monotonic() - _last_call_time
+    if elapsed < _MIN_CALL_INTERVAL:
+        time.sleep(_MIN_CALL_INTERVAL - elapsed)
+
+    try:
+        _last_call_time = time.monotonic()
+        raw = client.chat(EMAIL_RANK_SYSTEM_PROMPT, user_prompt)
+
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        result = json.loads(text)
+        if "best_email" not in result:
+            return None
+        return result
+
+    except json.JSONDecodeError as exc:
+        logger.error("Failed to parse email ranking response: %s", exc)
+        return None
+    except Exception as exc:
+        logger.error("Email ranking API error: %s", exc)
+        return None

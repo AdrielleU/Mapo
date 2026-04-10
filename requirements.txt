@@ -7,7 +7,8 @@ pydantic==2.10.6
 websockets==14.2
 
 # Browser automation + anti-detection
-camoufox[geoip]>=0.4.0
+camoufox[geoip]>=0.4.0               # Anti-detection Firefox (default)
+patchright>=1.58.0                    # Anti-detection Chromium (fallback, ARM-native)
 playwright>=1.49.0
 
 # HTTP client

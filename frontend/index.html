@@ -1,251 +1,1230 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Scrape Google Maps business data with enrichment, AI lead scoring, and multi-target export. Open source.">
+  <meta name="theme-color" content="#111a14" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f4f7f5" media="(prefers-color-scheme: light)">
   <title>Mapo — Google Maps Scraper</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F5FA;</text></svg>">
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/data.js" defer></script>
 </head>
 <body>
 <div class="container">
   <header>
     <h1><span>Mapo</span> &mdash; Maps Scraper</h1>
-    <span class="text-dim text-sm" id="health-status">Connecting...</span>
+    <div class="header-right">
+      <span class="text-dim text-sm" id="health-status">Connecting...</span>
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light and dark theme">
+        <span class="icon-sun" aria-hidden="true">&#9788;</span>
+        <span class="icon-moon" aria-hidden="true">&#9790;</span>
+      </button>
+    </div>
   </header>
 
-  <!-- Search Card -->
-  <div class="card">
-    <div class="flex-between">
-      <h2>New Search</h2>
-      <div class="toggle-group">
-        <button class="active" data-mode="quick" onclick="setMode('quick')">Quick Search</button>
-        <button data-mode="structured" onclick="setMode('structured')">Structured</button>
-      </div>
-    </div>
+  <!-- ============================================================ -->
+  <!-- TABS: Input / Output                                         -->
+  <!-- ============================================================ -->
+  <div class="tab-bar">
+    <button class="active" onclick="switchTab('input')">Input</button>
+    <button onclick="switchTab('output')">Output</button>
+    <button onclick="switchTab('schedules')">Schedules</button>
+    <button onclick="switchTab('settings')">Settings</button>
+  </div>
 
+  <!-- ============================================================ -->
+  <!-- INPUT TAB                                                    -->
+  <!-- ============================================================ -->
+  <div id="tab-input" class="tab-content active">
     <form id="search-form" onsubmit="submitSearch(event)">
-      <!-- Quick mode -->
-      <div id="mode-quick" class="mt-1">
-        <div class="form-row">
-          <div style="grid-column:1/-1">
-            <label for="query">Search Query</label>
-            <input type="text" id="query" placeholder='e.g. "Plumbers in Miami"'>
+
+      <!-- Search Queries -->
+      <div class="card">
+        <h2>Search Queries</h2>
+        <div class="query-list" id="query-list" role="list" aria-label="Search queries">
+          <div class="query-row" role="listitem">
+            <input type="text" placeholder='e.g. "Web Developers in Bangalore"' value="" aria-label="Search query">
+            <button type="button" class="remove-btn" onclick="removeQuery(this)" aria-label="Remove query">&times;</button>
+          </div>
+        </div>
+        <button type="button" class="add-field-btn mt-1" onclick="addQuery()">+ Add Query</button>
+        <p class="help-text mt-1">Enter search queries or Google Maps URLs, one per row.</p>
+      </div>
+
+      <!-- Section: Extract Cities By Country -->
+      <div class="card">
+        <div class="accordion-header" onclick="toggleAccordion(this)">
+          <span class="chevron">&#9654;</span> Extract Cities By Country
+        </div>
+        <div class="accordion-body" id="sec-country">
+          <div class="form-row">
+            <div>
+              <label for="country-display">Country</label>
+              <div class="searchable-select" id="country-select">
+                <input type="text" id="country-display" readonly placeholder="-- Select Country --" onclick="openSS('country-select')" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+                <input type="hidden" id="country" value="">
+                <div class="ss-dropdown" role="listbox">
+                  <div class="ss-search"><input type="text" placeholder="Search countries..." aria-label="Search countries" oninput="filterSS('country-select', this.value)"></div>
+                  <div class="ss-options" id="country-options"></div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <label for="state">State / Region</label>
+              <select id="state" onchange="loadCities()">
+                <option value="">-- All --</option>
+              </select>
+            </div>
+            <div>
+              <label for="biz-type">Business Type</label>
+              <div class="searchable-select" id="biztype-select">
+                <input type="text" id="biz-type" placeholder="e.g. Web Developers" autocomplete="off"
+                  role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Business type"
+                  oninput="onBizTypeInput(this.value)" onclick="openBizType()" onfocus="openBizType()">
+                <div class="ss-dropdown" role="listbox" id="biztype-dropdown">
+                  <div class="ss-options" id="biztype-options"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div>
+              <label for="max-cities">Max Cities</label>
+              <input type="number" id="max-cities" placeholder="Leave empty for all" min="1">
+              <p class="help-text">Leave empty to extract all cities in a country.</p>
+            </div>
+            <div>
+              <span class="text-dim text-sm">Randomize Cities</span>
+              <div class="toggle-wrap">
+                <label class="toggle" for="randomize-cities"><input type="checkbox" id="randomize-cities" checked aria-label="Randomize cities"><span class="slider"></span></label>
+                <label class="toggle-label" for="randomize-cities">Recommended</label>
+              </div>
+              <p class="help-text">Spreads places across different locations.</p>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Structured mode -->
-      <div id="mode-structured" class="hidden mt-1">
-        <div class="form-row">
-          <div>
-            <label for="country">Country</label>
-            <select id="country" onchange="loadStates()">
-              <option value="US" selected>United States</option>
-            </select>
-          </div>
-          <div>
-            <label for="state">State</label>
-            <select id="state"><option value="">-- Select --</option></select>
-          </div>
-          <div>
-            <label for="biz-type">Business Type</label>
-            <input type="text" id="biz-type" placeholder="e.g. Dentist">
-          </div>
-          <div>
-            <label for="max-results">Max Results</label>
-            <input type="number" id="max-results" value="100" min="1" max="5000">
+      <!-- Section: Email and Social Links Extraction -->
+      <div class="card">
+        <div class="accordion-header" onclick="toggleAccordion(this)">
+          <span class="chevron">&#9654;</span> Email and Social Links Extraction
+        </div>
+        <div class="accordion-body" id="sec-enrichment">
+          <div class="form-row">
+            <div class="full">
+              <label for="api-key">API Key</label>
+              <input type="text" id="api-key" placeholder="Enter your RapidAPI / Hunter / Apollo key">
+              <p class="help-text">Enter your API key to extract email addresses and social media links.</p>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Optional settings -->
-      <div class="collapsible-header" onclick="toggleSection('adv-settings')">
-        &#9654; Advanced Settings
-      </div>
-      <div id="adv-settings" class="collapsible-body">
-        <div class="form-row">
-          <div>
-            <label for="api-key">Enrichment API Key</label>
-            <input type="text" id="api-key" placeholder="Optional">
+      <!-- Section: Reviews Extraction -->
+      <div class="card">
+        <div class="accordion-header" onclick="toggleAccordion(this)">
+          <span class="chevron">&#9654;</span> Reviews Extraction
+        </div>
+        <div class="accordion-body" id="sec-reviews">
+          <div class="form-row">
+            <div>
+              <span class="text-dim text-sm">Enable Reviews</span>
+              <div class="toggle-wrap">
+                <label class="toggle" for="enable-reviews"><input type="checkbox" id="enable-reviews" aria-label="Enable reviews extraction"><span class="slider"></span></label>
+                <label class="toggle-label" for="enable-reviews" id="reviews-toggle-label">Disabled</label>
+              </div>
+            </div>
           </div>
-          <div>
-            <label for="enable-reviews">Reviews</label>
-            <select id="enable-reviews">
-              <option value="false">Disabled</option>
-              <option value="true">Enabled</option>
-            </select>
-          </div>
-          <div>
-            <label for="reviews-sort">Reviews Sort</label>
-            <select id="reviews-sort">
-              <option value="newest">Newest</option>
-              <option value="most_relevant">Most Relevant</option>
-              <option value="highest_rating">Highest Rating</option>
-              <option value="lowest_rating">Lowest Rating</option>
-            </select>
+          <div id="reviews-options" class="hidden">
+            <div class="form-row mt-1">
+              <div>
+                <label for="max-reviews">Max Reviews per Place</label>
+                <input type="number" id="max-reviews" value="20" min="0" placeholder="Leave empty for all">
+                <p class="help-text">Leave empty to extract all reviews.</p>
+              </div>
+              <div>
+                <label id="sort-label">Sort Reviews By</label>
+                <div class="seg-group" role="group" aria-labelledby="sort-label">
+                  <button type="button" class="active" data-val="newest" onclick="setReviewSort(this)">Newest</button>
+                  <button type="button" data-val="most_relevant" onclick="setReviewSort(this)">Most Relevant</button>
+                  <button type="button" data-val="highest_rating" onclick="setReviewSort(this)">Highest Rating</button>
+                  <button type="button" data-val="lowest_rating" onclick="setReviewSort(this)">Lowest Rating</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="mt-1">
-        <button type="submit" class="btn btn-primary">Run Search</button>
+      <!-- Section: Language and Max Results -->
+      <div class="card">
+        <div class="accordion-header" onclick="toggleAccordion(this)">
+          <span class="chevron">&#9654;</span> Language and Max Results
+        </div>
+        <div class="accordion-body" id="sec-lang">
+          <div class="form-row">
+            <div>
+              <label for="lang">Language</label>
+              <select id="lang">
+                <option value="">Default</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="it">Italian</option>
+                <option value="pt">Portuguese</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="zh">Chinese</option>
+                <option value="ar">Arabic</option>
+                <option value="hi">Hindi</option>
+                <option value="ru">Russian</option>
+                <option value="tr">Turkish</option>
+                <option value="nl">Dutch</option>
+                <option value="pl">Polish</option>
+                <option value="sv">Swedish</option>
+                <option value="th">Thai</option>
+                <option value="vi">Vietnamese</option>
+                <option value="id">Indonesian</option>
+              </select>
+            </div>
+            <div>
+              <label for="max-results">Max Results per Query</label>
+              <input type="number" id="max-results" value="100" min="1" max="5000" placeholder="Leave empty for all">
+              <p class="help-text">Leave empty to extract all places.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Geo Location -->
+      <div class="card">
+        <div class="accordion-header" onclick="toggleAccordion(this)">
+          <span class="chevron">&#9654;</span> Geo Location
+        </div>
+        <div class="accordion-body" id="sec-geo">
+          <div class="form-row">
+            <div>
+              <label for="coordinates">Coordinates</label>
+              <input type="text" id="coordinates" placeholder="12.900490, 77.571466">
+            </div>
+            <div>
+              <label for="radius-meters">Search Radius (meters)</label>
+              <input type="number" id="radius-meters" placeholder="e.g. 5000" min="100" max="50000">
+              <p class="help-text">Overrides zoom level. 5000 = 5km radius.</p>
+            </div>
+            <div>
+              <label for="zoom-level">Zoom Level (1-21)</label>
+              <input type="number" id="zoom-level" value="14" min="1" max="21" placeholder="14">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Result Filters -->
+      <div class="card">
+        <div class="accordion-header" onclick="toggleAccordion(this)">
+          <span class="chevron">&#9654;</span> Result Filters
+        </div>
+        <div class="accordion-body" id="sec-result-filters">
+          <div class="form-row">
+            <div>
+              <span class="text-dim text-sm">Skip Closed Places</span>
+              <div class="toggle-wrap">
+                <label class="toggle" for="skip-closed"><input type="checkbox" id="skip-closed" aria-label="Skip closed places"><span class="slider"></span></label>
+                <label class="toggle-label" for="skip-closed">Exclude closed businesses</label>
+              </div>
+            </div>
+            <div>
+              <label for="min-rating-filter">Min Rating</label>
+              <input type="number" id="min-rating-filter" placeholder="e.g. 4.0" step="0.1" min="0" max="5">
+            </div>
+            <div>
+              <label for="min-reviews-filter">Min Reviews</label>
+              <input type="number" id="min-reviews-filter" placeholder="e.g. 10" min="0">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="check-filter">
+              <input type="checkbox" id="filter-has-website">
+              <label for="filter-has-website">Must Have Website</label>
+            </div>
+            <div class="check-filter">
+              <input type="checkbox" id="filter-has-phone">
+              <label for="filter-has-phone">Must Have Phone</label>
+            </div>
+          </div>
+          <p class="help-text">Filters are applied server-side before enrichment to save API credits.</p>
+        </div>
+      </div>
+
+      <!-- Section: Cross-Reference (Skip Existing Places) -->
+      <div class="card">
+        <div class="accordion-header" onclick="toggleAccordion(this)">
+          <span class="chevron">&#9654;</span> Cross-Reference (Skip Existing Places)
+        </div>
+        <div class="accordion-body" id="sec-crossref">
+          <div class="form-row">
+            <div>
+              <label for="dedup-csv">Existing Leads File</label>
+              <input type="file" id="dedup-csv" accept=".csv,.json">
+              <p class="help-text">CSV or JSON of places you already have. Mapo will skip these.</p>
+            </div>
+            <div>
+              <label for="dedup-field">Match On</label>
+              <select id="dedup-field">
+                <option value="place_id">place_id (most reliable)</option>
+                <option value="name">name</option>
+                <option value="phone">phone</option>
+                <option value="website">website</option>
+                <option value="best_email">best_email</option>
+                <option value="address">address</option>
+              </select>
+            </div>
+            <div>
+              <label for="target-new">Target New (top-up)</label>
+              <input type="number" id="target-new" min="1" placeholder="e.g. 100">
+              <p class="help-text">Scrape extra to compensate for duplicates, return exactly this many new places.</p>
+            </div>
+          </div>
+          <p class="help-text" id="dedup-status"></p>
+        </div>
+      </div>
+
+      <!-- Section: Export Format (field selection) -->
+      <div class="card">
+        <div class="accordion-header" onclick="toggleAccordion(this)">
+          <span class="chevron">&#9654;</span> Export Format
+        </div>
+        <div class="accordion-body" id="sec-export">
+          <div class="form-row">
+            <div class="full">
+              <label for="export-preset">Export Preset</label>
+              <select id="export-preset">
+                <option value="">Full (all 80+ fields)</option>
+                <option value="minimal">Minimal (name, address, phone, website, rating, reviews)</option>
+                <option value="leads">Leads (sales-focused: contact + signals)</option>
+                <option value="clay">Clay (for Clay.com waterfall enrichment)</option>
+                <option value="apollo">Apollo (for Apollo.io import)</option>
+                <option value="hubspot">HubSpot (Companies object fields)</option>
+                <option value="instantly">Instantly (cold email campaign import)</option>
+                <option value="n8n">n8n / Make / Zapier (workflow-friendly)</option>
+                <option value="geo">Geo (mapping/coordinates only)</option>
+              </select>
+              <p class="help-text">Pick a preset that matches your downstream tool, or use custom fields below.</p>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="full">
+              <label for="custom-fields">Custom Fields (overrides preset)</label>
+              <input type="text" id="custom-fields" placeholder="e.g. name,phone,website,rating">
+              <p class="help-text">Comma-separated list. Leave empty to use the preset above.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Webhook / Integration -->
+      <div class="card">
+        <div class="accordion-header" onclick="toggleAccordion(this)">
+          <span class="chevron">&#9654;</span> Webhook / Integration
+        </div>
+        <div class="accordion-body" id="sec-webhook">
+          <div class="form-row">
+            <div class="full">
+              <label for="webhook-url">Webhook URL</label>
+              <input type="text" id="webhook-url" placeholder="https://your-n8n.com/webhook/abc123">
+              <p class="help-text">Results are POSTed here on completion. Works with n8n, Make, Zapier, or any HTTP endpoint.</p>
+            </div>
+          </div>
+          <div class="form-row">
+            <div>
+              <label for="webhook-header-key">Auth Header Name</label>
+              <input type="text" id="webhook-header-key" placeholder="e.g. Authorization">
+            </div>
+            <div>
+              <label for="webhook-header-val">Auth Header Value</label>
+              <input type="text" id="webhook-header-val" placeholder="e.g. Bearer sk-...">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="full">
+              <label for="error-webhook-url">Error Webhook URL</label>
+              <input type="text" id="error-webhook-url" placeholder="https://hooks.slack.com/services/XXX or https://api.pushover.net/...">
+              <p class="help-text">Fires on job failure only. Sends error details as JSON POST. Works with Slack, Pusher, Pushover, ntfy, or any URL.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div class="btn-bar">
+        <button type="submit" class="btn btn-primary">Run</button>
+        <button type="button" class="btn-reset" onclick="resetForm()">Reset to Default</button>
       </div>
     </form>
   </div>
 
-  <!-- Jobs Card -->
-  <div class="card">
-    <h2>Jobs</h2>
-    <div id="jobs-list"><span class="text-dim text-sm">No jobs yet.</span></div>
-  </div>
+  <!-- ============================================================ -->
+  <!-- OUTPUT TAB                                                   -->
+  <!-- ============================================================ -->
+  <div id="tab-output" class="tab-content">
 
-  <!-- Progress Card (shown when a job is running) -->
-  <div class="card hidden" id="progress-card">
-    <h2>Progress &mdash; <span id="progress-job-id"></span></h2>
-    <div class="progress-wrap">
-      <div class="progress-bar" id="progress-bar" style="width:0%"></div>
-      <div class="progress-text" id="progress-text">0%</div>
+    <!-- Jobs List -->
+    <div class="card">
+      <h2>Tasks</h2>
+      <div id="jobs-list"><span class="text-dim text-sm">No tasks yet.</span></div>
     </div>
-    <div class="text-sm text-dim" id="progress-detail"></div>
+
+    <!-- Progress Card -->
+    <div class="card hidden" id="progress-card">
+      <h2>Progress &mdash; <span id="progress-job-id"></span></h2>
+      <div class="progress-wrap">
+        <div class="progress-bar active" id="progress-bar" style="width:0%"></div>
+        <div class="progress-text" id="progress-text">0%</div>
+      </div>
+      <div class="text-sm text-dim" id="progress-detail"></div>
+    </div>
+
+    <!-- Results Card -->
+    <div class="card hidden" id="results-card">
+      <div class="flex-between">
+        <h2>Results &mdash; <span id="results-job-id"></span></h2>
+        <div class="export-bar">
+          <a class="btn btn-sm btn-secondary" id="dl-csv">CSV</a>
+          <a class="btn btn-sm btn-secondary" id="dl-json">JSON</a>
+        </div>
+      </div>
+
+      <!-- Filters toggle -->
+      <div class="flex-between mt-1">
+        <button class="btn btn-sm btn-ghost" id="toggle-filters-btn" onclick="toggleFilters()">Show Filters</button>
+        <div class="results-toolbar">
+          <label for="sort-select" class="text-sm text-dim" style="margin:0">Sort:</label>
+          <select id="sort-select" onchange="applySort()" style="max-width:220px">
+            <option value="">Don't Sort</option>
+            <option value="reviews-desc">Reviews &mdash; High to Low</option>
+            <option value="reviews-asc">Reviews &mdash; Low to High</option>
+            <option value="rating-desc">Rating &mdash; High to Low</option>
+            <option value="rating-asc">Rating &mdash; Low to High</option>
+            <option value="name-asc">Name A-Z</option>
+          </select>
+          <span class="text-sm text-dim" id="results-count"></span>
+        </div>
+      </div>
+
+      <!-- Filters Panel -->
+      <div class="filters-panel" id="filters-panel">
+        <div>
+          <label for="f-min-reviews">Min Reviews</label>
+          <input type="number" id="f-min-reviews" placeholder="0" oninput="applyFilters()">
+        </div>
+        <div>
+          <label for="f-max-reviews">Max Reviews</label>
+          <input type="number" id="f-max-reviews" placeholder="Any" oninput="applyFilters()">
+        </div>
+        <div>
+          <label for="f-min-rating">Min Rating</label>
+          <input type="number" id="f-min-rating" placeholder="0" step="0.1" min="0" max="5" oninput="applyFilters()">
+        </div>
+        <div class="check-filter">
+          <input type="checkbox" id="f-has-website" onchange="applyFilters()">
+          <label for="f-has-website">Has Website</label>
+        </div>
+        <div class="check-filter">
+          <input type="checkbox" id="f-has-phone" onchange="applyFilters()">
+          <label for="f-has-phone">Has Phone</label>
+        </div>
+        <div class="check-filter">
+          <input type="checkbox" id="f-has-ads" onchange="applyFilters()">
+          <label for="f-has-ads">Spending on Ads</label>
+        </div>
+        <div class="check-filter">
+          <input type="checkbox" id="f-can-claim" onchange="applyFilters()">
+          <label for="f-can-claim">Can Claim</label>
+        </div>
+        <div>
+          <label for="f-search">Search</label>
+          <input type="text" id="f-search" placeholder="Filter..." oninput="applyFilters()">
+        </div>
+      </div>
+
+      <!-- Data table -->
+      <div class="table-wrap">
+        <table id="results-table">
+          <thead id="results-thead"></thead>
+          <tbody id="results-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div class="pagination" id="pagination"></div>
+    </div>
   </div>
 
-  <!-- Results Card -->
-  <div class="card hidden" id="results-card">
-    <div class="flex-between">
-      <h2>Results &mdash; <span id="results-job-id"></span></h2>
-      <div class="export-bar">
-        <a class="btn btn-sm btn-secondary" id="dl-csv">CSV</a>
-        <a class="btn btn-sm btn-secondary" id="dl-json">JSON</a>
+  <!-- ============================================================ -->
+  <!-- SCHEDULES TAB                                                -->
+  <!-- ============================================================ -->
+  <div id="tab-schedules" class="tab-content">
+    <div class="card">
+      <div class="flex-between">
+        <h2>Scheduled Jobs</h2>
+        <button class="btn btn-primary btn-sm" onclick="openScheduleEditor()">+ New Schedule</button>
+      </div>
+      <p class="help-text">Cron-based jobs that run automatically. Use the same scrape options as the Input tab.</p>
+      <div id="schedules-list"><span class="text-dim text-sm">No schedules yet.</span></div>
+    </div>
+
+    <!-- Schedule editor (hidden by default) -->
+    <div id="schedule-editor" class="card hidden">
+      <h2 id="schedule-editor-title">New Schedule</h2>
+      <input type="hidden" id="sch-id" value="">
+
+      <div class="form-row">
+        <div>
+          <label for="sch-name">Name</label>
+          <input type="text" id="sch-name" placeholder="e.g. Weekly Austin Coffee">
+        </div>
+        <div>
+          <span class="text-dim text-sm">Enabled</span>
+          <div class="toggle-wrap">
+            <label class="toggle" for="sch-enabled"><input type="checkbox" id="sch-enabled" checked aria-label="Enabled"><span class="slider"></span></label>
+            <label class="toggle-label" for="sch-enabled">Active</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="full">
+          <label for="sch-cron">Cron Expression</label>
+          <input type="text" id="sch-cron" placeholder="0 8 * * 1" value="0 8 * * 1">
+          <p class="help-text">5 fields: minute hour day month weekday</p>
+          <div class="seg-group" style="margin-top:0.5rem">
+            <button type="button" onclick="setCronPreset('0 * * * *')">Hourly</button>
+            <button type="button" onclick="setCronPreset('0 8 * * *')">Daily 8am</button>
+            <button type="button" onclick="setCronPreset('0 8 * * 1')">Weekly Mon 8am</button>
+            <button type="button" onclick="setCronPreset('0 8 1 * *')">Monthly 1st 8am</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="full">
+          <label for="sch-query">Search Query</label>
+          <input type="text" id="sch-query" placeholder='e.g. "Coffee shops in Austin"'>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div>
+          <label for="sch-country">Country (or query above)</label>
+          <input type="text" id="sch-country" placeholder="e.g. US" maxlength="2">
+        </div>
+        <div>
+          <label for="sch-state">State (US only)</label>
+          <input type="text" id="sch-state" placeholder="e.g. California">
+        </div>
+        <div>
+          <label for="sch-biz">Business Type</label>
+          <input type="text" id="sch-biz" placeholder="e.g. dentist">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div>
+          <label for="sch-max-results">Max Results</label>
+          <input type="number" id="sch-max-results" value="100" min="1">
+        </div>
+        <div>
+          <label for="sch-max-cities">Max Cities</label>
+          <input type="number" id="sch-max-cities" placeholder="optional" min="1">
+        </div>
+        <div>
+          <label for="sch-target-new">Target New (top-up)</label>
+          <input type="number" id="sch-target-new" placeholder="optional" min="1">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="check-filter">
+          <input type="checkbox" id="sch-skip-closed" checked>
+          <label for="sch-skip-closed">Skip closed places</label>
+        </div>
+        <div class="check-filter">
+          <input type="checkbox" id="sch-enable-reviews">
+          <label for="sch-enable-reviews">Enable reviews</label>
+        </div>
+        <div class="check-filter">
+          <input type="checkbox" id="sch-enable-ai">
+          <label for="sch-enable-ai">Enable AI scoring</label>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="full">
+          <label for="sch-webhook">Webhook URL (optional)</label>
+          <input type="text" id="sch-webhook" placeholder="https://hooks.slack.com/...">
+        </div>
+      </div>
+
+      <div class="btn-bar">
+        <button type="button" class="btn btn-primary" onclick="saveSchedule()">Save Schedule</button>
+        <button type="button" class="btn btn-ghost" onclick="closeScheduleEditor()">Cancel</button>
+        <span class="text-dim text-sm" id="schedule-status"></span>
       </div>
     </div>
-    <div class="filter-box mt-1">
-      <input type="text" id="results-filter" placeholder="Filter results..." oninput="filterResults()">
-      <span class="text-sm text-dim" id="results-count"></span>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- SETTINGS TAB                                                 -->
+  <!-- ============================================================ -->
+  <div id="tab-settings" class="tab-content">
+
+    <!-- Scraping -->
+    <div class="card">
+      <h2>Scraping</h2>
+      <div class="form-row">
+        <div class="full">
+          <label>Recommended Presets</label>
+          <div class="seg-group">
+            <button type="button" onclick="applyPreset('conservative')">Conservative</button>
+            <button type="button" onclick="applyPreset('balanced')">Balanced</button>
+            <button type="button" onclick="applyPreset('aggressive')">Aggressive</button>
+            <button type="button" onclick="applyPreset('leadgen')">Lead-gen</button>
+          </div>
+          <p class="help-text">Click a preset to fill in recommended values, then click Save Settings.</p>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="s-browser">Browser Backend</label>
+          <select id="s-browser">
+            <option value="camoufox" selected>Camoufox (Firefox)</option>
+            <option value="patchright">Patchright (Chromium, ARM-native)</option>
+          </select>
+          <p class="help-text">Camoufox: stealth Firefox with fingerprint spoofing. Patchright: Chromium, ARM-native.</p>
+        </div>
+        <div>
+          <label for="s-concurrency">Concurrency</label>
+          <input type="number" id="s-concurrency" min="1" max="20" placeholder="5">
+          <p class="help-text">Parallel HTTP requests (1-20).</p>
+        </div>
+        <div>
+          <label for="s-min-delay">Min Delay (sec)</label>
+          <input type="number" id="s-min-delay" step="0.1" min="0" placeholder="0.5">
+        </div>
+        <div>
+          <label for="s-max-delay">Max Delay (sec)</label>
+          <input type="number" id="s-max-delay" step="0.1" min="0" placeholder="2.0">
+        </div>
+        <div>
+          <label for="s-scroll-timeout">Scroll Timeout (sec)</label>
+          <input type="number" id="s-scroll-timeout" min="10" max="120" placeholder="40">
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <span class="text-dim text-sm">Headless Mode</span>
+          <div class="toggle-wrap">
+            <label class="toggle" for="s-headless"><input type="checkbox" id="s-headless" checked aria-label="Headless mode"><span class="slider"></span></label>
+            <label class="toggle-label" for="s-headless">Browser hidden (uncheck to debug)</label>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="table-wrap">
-      <table id="results-table">
-        <thead id="results-thead"></thead>
-        <tbody id="results-tbody"></tbody>
-      </table>
+
+    <!-- Proxy -->
+    <div class="card">
+      <h2>Proxy</h2>
+      <div class="form-row">
+        <div class="full">
+          <label for="s-proxy-urls">Proxy URLs (one per line)</label>
+          <textarea id="s-proxy-urls" rows="3" placeholder="http://user:pass@proxy1:8080&#10;socks5://user:pass@proxy2:1080"></textarea>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="s-proxy-rotation">Rotation Strategy</label>
+          <select id="s-proxy-rotation">
+            <option value="round_robin">Round Robin</option>
+            <option value="random">Random</option>
+            <option value="geo_match">Geo Match</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Enrichment -->
+    <div class="card">
+      <h2>Enrichment</h2>
+      <div class="form-row">
+        <div>
+          <label for="s-enrich-provider">Provider</label>
+          <select id="s-enrich-provider">
+            <option value="rapidapi">RapidAPI</option>
+            <option value="hunter">Hunter.io</option>
+            <option value="apollo">Apollo.io</option>
+          </select>
+        </div>
+        <div>
+          <label for="s-enrich-key">API Key</label>
+          <input type="password" id="s-enrich-key" placeholder="Enter API key">
+        </div>
+      </div>
+    </div>
+
+    <!-- AI -->
+    <div class="card">
+      <h2>AI Lead Scoring</h2>
+      <div class="form-row">
+        <div>
+          <label for="s-ai-provider">Provider</label>
+          <select id="s-ai-provider">
+            <option value="">Disabled</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="openai">OpenAI (GPT)</option>
+            <option value="gemini">Google (Gemini)</option>
+            <option value="vllm">vLLM (Self-hosted)</option>
+          </select>
+        </div>
+        <div>
+          <label for="s-ai-key">API Key</label>
+          <input type="password" id="s-ai-key" placeholder="Enter API key">
+        </div>
+        <div>
+          <label for="s-ai-model">Model</label>
+          <input type="text" id="s-ai-model" placeholder="e.g. claude-sonnet-4-20250514">
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="s-ai-baseurl">Base URL (vLLM only)</label>
+          <input type="text" id="s-ai-baseurl" placeholder="http://localhost:8001/v1">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="full">
+          <label for="s-ai-icp">Ideal Customer Profile</label>
+          <textarea id="s-ai-icp" rows="3" placeholder="Describe your target customer..."></textarea>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="full">
+          <label for="s-ai-product">Product Description</label>
+          <textarea id="s-ai-product" rows="3" placeholder="Describe what you're selling..."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Webhooks -->
+    <div class="card">
+      <h2>Webhooks</h2>
+      <div class="form-row">
+        <div class="full">
+          <label for="s-webhook-urls">Webhook URLs (one per line)</label>
+          <textarea id="s-webhook-urls" rows="2" placeholder="https://hooks.slack.com/services/XXX&#10;https://your-n8n.com/webhook/abc"></textarea>
+          <p class="help-text">Global webhooks — fire on every completed job. Per-job webhooks can be set in the Input tab.</p>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="full">
+          <label for="s-error-webhook">Error / Notification URL</label>
+          <input type="text" id="s-error-webhook" placeholder="https://hooks.slack.com/services/XXX or https://ntfy.sh/mapo-alerts">
+          <p class="help-text">Auto-detects: Slack, Discord, ntfy.sh, Pushover, Pushbullet, n8n, Make, or any custom URL. Fires on job failures.</p>
+          <button type="button" class="btn btn-sm btn-ghost" style="margin-top:0.5rem" onclick="testNotification()">Send Test Notification</button>
+          <span class="text-sm text-dim" id="test-notification-status" style="margin-left:0.5rem"></span>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="s-heartbeat-url">Heartbeat URL (optional)</label>
+          <input type="text" id="s-heartbeat-url" placeholder="Leave empty to disable">
+          <p class="help-text">Periodic "I'm alive" pings + crash recovery alerts. Same URL formats as above.</p>
+        </div>
+        <div>
+          <label for="s-heartbeat-interval">Heartbeat Interval (seconds)</label>
+          <input type="number" id="s-heartbeat-interval" min="30" placeholder="300">
+          <p class="help-text">0 to disable, minimum 30s. Default 300 (5min).</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Limits / Safeguards -->
+    <div class="card">
+      <h2>Limits & Safeguards</h2>
+      <p class="help-text">Hard caps that prevent runaway jobs. Server enforces these on every scrape request.</p>
+      <div class="form-row">
+        <div>
+          <label for="s-max-results-per-query">Max Results per Query</label>
+          <input type="number" id="s-max-results-per-query" min="1" placeholder="5000">
+        </div>
+        <div>
+          <label for="s-max-cities-per-job">Max Cities per Job</label>
+          <input type="number" id="s-max-cities-per-job" min="1" placeholder="200">
+        </div>
+        <div>
+          <label for="s-max-total-places">Max Total Places</label>
+          <input type="number" id="s-max-total-places" min="1" placeholder="10000">
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="s-max-concurrent-jobs">Max Concurrent Jobs</label>
+          <input type="number" id="s-max-concurrent-jobs" min="1" placeholder="3">
+        </div>
+        <div>
+          <label for="s-max-runtime-minutes">Max Runtime (minutes)</label>
+          <input type="number" id="s-max-runtime-minutes" min="1" placeholder="120">
+        </div>
+        <div>
+          <label for="s-warn-threshold">Warn Threshold</label>
+          <input type="number" id="s-warn-threshold" min="1" placeholder="1000">
+        </div>
+      </div>
+    </div>
+
+    <!-- Save -->
+    <div class="btn-bar">
+      <button type="button" class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+      <span class="text-dim text-sm" id="settings-status"></span>
     </div>
   </div>
 </div>
 
 <script>
-/* ------ State ------ */
-let currentMode = 'quick';
+/* ================================================================
+   STATE
+   ================================================================ */
 let allResults = [];
-let sortCol = null;
-let sortAsc = true;
-let wsConn = null;
+let filteredResults = [];
+let currentPage = 1;
+const PAGE_SIZE = 50;
+let reviewSort = 'newest';
+let sseSource = null;
 let pollTimer = null;
-const COLUMNS = ['name','phone','website','rating','reviews','address','main_category'];
+let categoriesLoaded = false;
 
-/* ------ Mode toggle ------ */
-function setMode(mode) {
-  currentMode = mode;
-  document.querySelectorAll('.toggle-group button').forEach(b =>
-    b.classList.toggle('active', b.dataset.mode === mode));
-  document.getElementById('mode-quick').classList.toggle('hidden', mode !== 'quick');
-  document.getElementById('mode-structured').classList.toggle('hidden', mode !== 'structured');
+const COLUMNS = ['name','phone','website','rating','reviews','address','main_category','is_spending_on_ads','can_claim'];
+
+/* ================================================================
+   COUNTRY DATA (embedded, same as omkarcloud)
+   ================================================================ */
+const COUNTRIES = [{"value":"AF","label":"Afghanistan (49 Cities)"},{"value":"AX","label":"Aland Islands (1 City)"},{"value":"AL","label":"Albania (21 Cities)"},{"value":"DZ","label":"Algeria (250 Cities)"},{"value":"AS","label":"American Samoa (1 City)"},{"value":"AD","label":"Andorra (2 Cities)"},{"value":"AO","label":"Angola (26 Cities)"},{"value":"AI","label":"Anguilla (1 City)"},{"value":"AG","label":"Antigua and Barbuda (1 City)"},{"value":"AR","label":"Argentina (225 Cities)"},{"value":"AM","label":"Armenia (19 Cities)"},{"value":"AW","label":"Aruba (3 Cities)"},{"value":"AU","label":"Australia (289 Cities)"},{"value":"AT","label":"Austria (48 Cities)"},{"value":"AZ","label":"Azerbaijan (59 Cities)"},{"value":"BS","label":"Bahamas (3 Cities)"},{"value":"BH","label":"Bahrain (8 Cities)"},{"value":"BD","label":"Bangladesh (104 Cities)"},{"value":"BB","label":"Barbados (1 City)"},{"value":"BY","label":"Belarus (49 Cities)"},{"value":"BE","label":"Belgium (224 Cities)"},{"value":"BZ","label":"Belize (5 Cities)"},{"value":"BJ","label":"Benin (29 Cities)"},{"value":"BM","label":"Bermuda (1 City)"},{"value":"BT","label":"Bhutan (4 Cities)"},{"value":"BO","label":"Bolivia (39 Cities)"},{"value":"BQ","label":"Bonaire, Saint Eustatius and Saba (1 City)"},{"value":"BA","label":"Bosnia and Herzegovina (22 Cities)"},{"value":"BW","label":"Botswana (18 Cities)"},{"value":"BR","label":"Brazil (1200 Cities)"},{"value":"VG","label":"British Virgin Islands (1 City)"},{"value":"BN","label":"Brunei (4 Cities)"},{"value":"BG","label":"Bulgaria (56 Cities)"},{"value":"BF","label":"Burkina Faso (41 Cities)"},{"value":"BI","label":"Burundi (10 Cities)"},{"value":"CV","label":"Cabo Verde (4 Cities)"},{"value":"KH","label":"Cambodia (27 Cities)"},{"value":"CM","label":"Cameroon (63 Cities)"},{"value":"CA","label":"Canada (329 Cities)"},{"value":"KY","label":"Cayman Islands (2 Cities)"},{"value":"CF","label":"Central African Republic (20 Cities)"},{"value":"TD","label":"Chad (24 Cities)"},{"value":"CL","label":"Chile (103 Cities)"},{"value":"CN","label":"China (1784 Cities)"},{"value":"CX","label":"Christmas Island (1 City)"},{"value":"CC","label":"Cocos Islands (1 City)"},{"value":"CO","label":"Colombia (303 Cities)"},{"value":"KM","label":"Comoros (2 Cities)"},{"value":"CK","label":"Cook Islands (1 City)"},{"value":"CR","label":"Costa Rica (40 Cities)"},{"value":"HR","label":"Croatia (25 Cities)"},{"value":"CU","label":"Cuba (126 Cities)"},{"value":"CW","label":"Curacao (1 City)"},{"value":"CY","label":"Cyprus (9 Cities)"},{"value":"CZ","label":"Czechia (96 Cities)"},{"value":"CD","label":"DR Congo (68 Cities)"},{"value":"DK","label":"Denmark (59 Cities)"},{"value":"DJ","label":"Djibouti (4 Cities)"},{"value":"DM","label":"Dominica (1 City)"},{"value":"DO","label":"Dominican Republic (48 Cities)"},{"value":"EC","label":"Ecuador (66 Cities)"},{"value":"EG","label":"Egypt (133 Cities)"},{"value":"SV","label":"El Salvador (35 Cities)"},{"value":"GQ","label":"Equatorial Guinea (3 Cities)"},{"value":"ER","label":"Eritrea (6 Cities)"},{"value":"EE","label":"Estonia (8 Cities)"},{"value":"SZ","label":"Eswatini (3 Cities)"},{"value":"ET","label":"Ethiopia (91 Cities)"},{"value":"FK","label":"Falkland Islands (1 City)"},{"value":"FO","label":"Faroe Islands (1 City)"},{"value":"FJ","label":"Fiji (6 Cities)"},{"value":"FI","label":"Finland (76 Cities)"},{"value":"FR","label":"France (649 Cities)"},{"value":"GF","label":"French Guiana (5 Cities)"},{"value":"PF","label":"French Polynesia (3 Cities)"},{"value":"TF","label":"French Southern Territories (1 City)"},{"value":"GA","label":"Gabon (9 Cities)"},{"value":"GM","label":"Gambia (7 Cities)"},{"value":"GE","label":"Georgia (21 Cities)"},{"value":"DE","label":"Germany (1109 Cities)"},{"value":"GH","label":"Ghana (61 Cities)"},{"value":"GI","label":"Gibraltar (1 City)"},{"value":"GR","label":"Greece (113 Cities)"},{"value":"GL","label":"Greenland (1 City)"},{"value":"GD","label":"Grenada (1 City)"},{"value":"GP","label":"Guadeloupe (10 Cities)"},{"value":"GU","label":"Guam (7 Cities)"},{"value":"GT","label":"Guatemala (102 Cities)"},{"value":"GG","label":"Guernsey (1 City)"},{"value":"GN","label":"Guinea (19 Cities)"},{"value":"GW","label":"Guinea-Bissau (2 Cities)"},{"value":"GY","label":"Guyana (3 Cities)"},{"value":"HT","label":"Haiti (26 Cities)"},{"value":"HN","label":"Honduras (24 Cities)"},{"value":"HK","label":"Hong Kong (19 Cities)"},{"value":"HU","label":"Hungary (114 Cities)"},{"value":"IS","label":"Iceland (6 Cities)"},{"value":"IN","label":"India (2408 Cities)"},{"value":"ID","label":"Indonesia (400 Cities)"},{"value":"IR","label":"Iran (202 Cities)"},{"value":"IQ","label":"Iraq (72 Cities)"},{"value":"IE","label":"Ireland (39 Cities)"},{"value":"IM","label":"Isle of Man (1 City)"},{"value":"IL","label":"Israel (103 Cities)"},{"value":"IT","label":"Italy (613 Cities)"},{"value":"CI","label":"Ivory Coast (60 Cities)"},{"value":"JM","label":"Jamaica (11 Cities)"},{"value":"JP","label":"Japan (828 Cities)"},{"value":"JE","label":"Jersey (1 City)"},{"value":"JO","label":"Jordan (27 Cities)"},{"value":"KZ","label":"Kazakhstan (77 Cities)"},{"value":"KE","label":"Kenya (58 Cities)"},{"value":"KI","label":"Kiribati (1 City)"},{"value":"XK","label":"Kosovo (21 Cities)"},{"value":"KW","label":"Kuwait (18 Cities)"},{"value":"KG","label":"Kyrgyzstan (30 Cities)"},{"value":"LA","label":"Laos (11 Cities)"},{"value":"LV","label":"Latvia (14 Cities)"},{"value":"LB","label":"Lebanon (14 Cities)"},{"value":"LS","label":"Lesotho (9 Cities)"},{"value":"LR","label":"Liberia (10 Cities)"},{"value":"LY","label":"Libya (43 Cities)"},{"value":"LI","label":"Liechtenstein (1 City)"},{"value":"LT","label":"Lithuania (36 Cities)"},{"value":"LU","label":"Luxembourg (3 Cities)"},{"value":"MO","label":"Macao (1 City)"},{"value":"MG","label":"Madagascar (84 Cities)"},{"value":"MW","label":"Malawi (17 Cities)"},{"value":"MY","label":"Malaysia (142 Cities)"},{"value":"MV","label":"Maldives (1 City)"},{"value":"ML","label":"Mali (21 Cities)"},{"value":"MT","label":"Malta (7 Cities)"},{"value":"MH","label":"Marshall Islands (2 Cities)"},{"value":"MQ","label":"Martinique (8 Cities)"},{"value":"MR","label":"Mauritania (14 Cities)"},{"value":"MU","label":"Mauritius (13 Cities)"},{"value":"YT","label":"Mayotte (3 Cities)"},{"value":"MX","label":"Mexico (620 Cities)"},{"value":"FM","label":"Micronesia (1 City)"},{"value":"MD","label":"Moldova (21 Cities)"},{"value":"MC","label":"Monaco (2 Cities)"},{"value":"MN","label":"Mongolia (22 Cities)"},{"value":"ME","label":"Montenegro (8 Cities)"},{"value":"MS","label":"Montserrat (2 Cities)"},{"value":"MA","label":"Morocco (85 Cities)"},{"value":"MZ","label":"Mozambique (26 Cities)"},{"value":"MM","label":"Myanmar (67 Cities)"},{"value":"NA","label":"Namibia (14 Cities)"},{"value":"NR","label":"Nauru (1 City)"},{"value":"NP","label":"Nepal (43 Cities)"},{"value":"NL","label":"Netherlands (228 Cities)"},{"value":"NC","label":"New Caledonia (3 Cities)"},{"value":"NZ","label":"New Zealand (55 Cities)"},{"value":"NI","label":"Nicaragua (36 Cities)"},{"value":"NE","label":"Niger (25 Cities)"},{"value":"NG","label":"Nigeria (244 Cities)"},{"value":"NU","label":"Niue (1 City)"},{"value":"NF","label":"Norfolk Island (1 City)"},{"value":"MP","label":"Northern Mariana Islands (1 City)"},{"value":"KP","label":"North Korea (59 Cities)"},{"value":"MK","label":"North Macedonia (37 Cities)"},{"value":"NO","label":"Norway (39 Cities)"},{"value":"OM","label":"Oman (26 Cities)"},{"value":"PK","label":"Pakistan (315 Cities)"},{"value":"PW","label":"Palau (1 City)"},{"value":"PS","label":"Palestinian Territory (43 Cities)"},{"value":"PA","label":"Panama (26 Cities)"},{"value":"PG","label":"Papua New Guinea (13 Cities)"},{"value":"PY","label":"Paraguay (26 Cities)"},{"value":"PE","label":"Peru (130 Cities)"},{"value":"PH","label":"Philippines (438 Cities)"},{"value":"PN","label":"Pitcairn (1 City)"},{"value":"PL","label":"Poland (333 Cities)"},{"value":"PT","label":"Portugal (140 Cities)"},{"value":"PR","label":"Puerto Rico (21 Cities)"},{"value":"QA","label":"Qatar (5 Cities)"},{"value":"CG","label":"Republic of the Congo (12 Cities)"},{"value":"RE","label":"Reunion (14 Cities)"},{"value":"RO","label":"Romania (134 Cities)"},{"value":"RU","label":"Russia (1077 Cities)"},{"value":"RW","label":"Rwanda (11 Cities)"},{"value":"BL","label":"Saint Barthelemy (1 City)"},{"value":"SH","label":"Saint Helena (1 City)"},{"value":"KN","label":"Saint Kitts and Nevis (1 City)"},{"value":"LC","label":"Saint Lucia (1 City)"},{"value":"MF","label":"Saint Martin (1 City)"},{"value":"PM","label":"Saint Pierre and Miquelon (1 City)"},{"value":"VC","label":"Saint Vincent and the Grenadines (2 Cities)"},{"value":"WS","label":"Samoa (1 City)"},{"value":"SM","label":"San Marino (1 City)"},{"value":"ST","label":"Sao Tome and Principe (1 City)"},{"value":"SA","label":"Saudi Arabia (63 Cities)"},{"value":"SN","label":"Senegal (31 Cities)"},{"value":"RS","label":"Serbia (48 Cities)"},{"value":"SC","label":"Seychelles (1 City)"},{"value":"SL","label":"Sierra Leone (12 Cities)"},{"value":"SG","label":"Singapore (5 Cities)"},{"value":"SX","label":"Sint Maarten (1 City)"},{"value":"SK","label":"Slovakia (53 Cities)"},{"value":"SI","label":"Slovenia (9 Cities)"},{"value":"SB","label":"Solomon Islands (1 City)"},{"value":"SO","label":"Somalia (33 Cities)"},{"value":"ZA","label":"South Africa (169 Cities)"},{"value":"GS","label":"South Georgia (1 City)"},{"value":"KR","label":"South Korea (125 Cities)"},{"value":"SS","label":"South Sudan (16 Cities)"},{"value":"ES","label":"Spain (624 Cities)"},{"value":"LK","label":"Sri Lanka (54 Cities)"},{"value":"SD","label":"Sudan (48 Cities)"},{"value":"SR","label":"Suriname (2 Cities)"},{"value":"SJ","label":"Svalbard and Jan Mayen (1 City)"},{"value":"SE","label":"Sweden (106 Cities)"},{"value":"CH","label":"Switzerland (86 Cities)"},{"value":"SY","label":"Syria (76 Cities)"},{"value":"TW","label":"Taiwan (31 Cities)"},{"value":"TJ","label":"Tajikistan (27 Cities)"},{"value":"TZ","label":"Tanzania (185 Cities)"},{"value":"TH","label":"Thailand (222 Cities)"},{"value":"TL","label":"Timor Leste (9 Cities)"},{"value":"TG","label":"Togo (17 Cities)"},{"value":"TO","label":"Tonga (1 City)"},{"value":"TT","label":"Trinidad and Tobago (13 Cities)"},{"value":"TN","label":"Tunisia (74 Cities)"},{"value":"TR","label":"Turkey (391 Cities)"},{"value":"TM","label":"Turkmenistan (24 Cities)"},{"value":"TC","label":"Turks and Caicos Islands (1 City)"},{"value":"TV","label":"Tuvalu (1 City)"},{"value":"UG","label":"Uganda (48 Cities)"},{"value":"UA","label":"Ukraine (254 Cities)"},{"value":"AE","label":"United Arab Emirates (19 Cities)"},{"value":"GB","label":"United Kingdom (823 Cities)"},{"value":"US","label":"United States (2829 Cities)"},{"value":"UY","label":"Uruguay (31 Cities)"},{"value":"VI","label":"U.S. Virgin Islands (2 Cities)"},{"value":"UZ","label":"Uzbekistan (103 Cities)"},{"value":"VU","label":"Vanuatu (1 City)"},{"value":"VA","label":"Vatican (1 City)"},{"value":"VE","label":"Venezuela (207 Cities)"},{"value":"VN","label":"Vietnam (116 Cities)"},{"value":"WF","label":"Wallis and Futuna (1 City)"},{"value":"EH","label":"Western Sahara (3 Cities)"},{"value":"YE","label":"Yemen (23 Cities)"},{"value":"ZM","label":"Zambia (29 Cities)"},{"value":"ZW","label":"Zimbabwe (28 Cities)"}];
+
+/* ================================================================
+   TABS
+   ================================================================ */
+function switchTab(name) {
+  document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab-bar button[onclick*="${name}"]`).classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+  // Lazy-load schedules when first opened
+  if (name === 'schedules') loadSchedules();
 }
 
-/* ------ Collapsible ------ */
-function toggleSection(id) {
+/* ================================================================
+   ACCORDION
+   ================================================================ */
+function toggleAccordion(header) {
+  header.classList.toggle('open');
+  const body = header.nextElementSibling;
+  body.classList.toggle('open');
+}
+
+/* ================================================================
+   QUERY ROWS
+   ================================================================ */
+function addQuery() {
+  const list = document.getElementById('query-list');
+  const row = document.createElement('div');
+  row.className = 'query-row';
+  row.setAttribute('role', 'listitem');
+  row.innerHTML = '<input type="text" placeholder=\'e.g. "Plumbers in Miami"\' aria-label="Search query"><button type="button" class="remove-btn" onclick="removeQuery(this)" aria-label="Remove query">&times;</button>';
+  list.appendChild(row);
+}
+function removeQuery(btn) {
+  const list = document.getElementById('query-list');
+  if (list.children.length > 1) btn.parentElement.remove();
+}
+
+/* ================================================================
+   SEARCHABLE SELECT (country dropdown)
+   ================================================================ */
+function initCountrySelect() {
+  const opts = document.getElementById('country-options');
+  // Add a "clear" option
+  let html = '<div class="ss-option" data-value="" onclick="selectSS(\'country-select\',\'\',\'-- Select Country --\')">-- None --</div>';
+  COUNTRIES.forEach(c => {
+    html += `<div class="ss-option" data-value="${c.value}" onclick="selectSS('country-select','${c.value}','${c.label}')">${c.label}</div>`;
+  });
+  opts.innerHTML = html;
+}
+
+function openSS(id) {
   const el = document.getElementById(id);
-  el.classList.toggle('open');
-  const hdr = el.previousElementSibling;
-  hdr.innerHTML = (el.classList.contains('open') ? '&#9660;' : '&#9654;') + ' Advanced Settings';
+  const isOpen = el.classList.contains('open');
+  // Close all
+  document.querySelectorAll('.searchable-select').forEach(s => {
+    s.classList.remove('open');
+    const cb = s.querySelector('[role="combobox"]');
+    if (cb) cb.setAttribute('aria-expanded', 'false');
+  });
+  if (!isOpen) {
+    el.classList.add('open');
+    const cb = el.querySelector('[role="combobox"]');
+    if (cb) cb.setAttribute('aria-expanded', 'true');
+    const input = el.querySelector('.ss-search input');
+    if (input) { input.value = ''; filterSS(id, ''); input.focus(); }
+  }
 }
 
-/* ------ Load states ------ */
-async function loadStates() {
-  const country = document.getElementById('country').value;
+function selectSS(id, value, label) {
+  const el = document.getElementById(id);
+  el.querySelector('input[type="text"]').value = label === '-- Select Country --' ? '' : label;
+  el.querySelector('input[type="hidden"]').value = value;
+  el.classList.remove('open');
+  const cb = el.querySelector('[role="combobox"]');
+  if (cb) cb.setAttribute('aria-expanded', 'false');
+  // Trigger state load when country changes
+  if (id === 'country-select') {
+    onCountryChange(value);
+  }
+}
+
+function filterSS(id, query) {
+  const el = document.getElementById(id);
+  const q = query.toLowerCase();
+  el.querySelectorAll('.ss-option').forEach(opt => {
+    opt.style.display = opt.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+// Close dropdowns on outside click
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.searchable-select')) {
+    document.querySelectorAll('.searchable-select').forEach(s => {
+      s.classList.remove('open');
+      const cb = s.querySelector('[role="combobox"]');
+      if (cb) cb.setAttribute('aria-expanded', 'false');
+    });
+  }
+});
+
+/* ================================================================
+   COUNTRY / STATE / CITY CHAIN
+   ================================================================ */
+async function onCountryChange(countryCode) {
+  const stateSel = document.getElementById('state');
+  stateSel.innerHTML = '<option value="">-- All --</option>';
+
+  if (!countryCode) return;
+
+  // Disable query inputs when country is selected (like omkarcloud)
+  updateQueryState();
+
+  // Use static US_STATES if available and country is US
+  if (countryCode === 'US' && typeof US_STATES !== 'undefined' && US_STATES.length > 0) {
+    US_STATES.forEach(s => {
+      stateSel.innerHTML += `<option value="${s}">${s}</option>`;
+    });
+    return;
+  }
+
+  // Fall back to API
   try {
-    const r = await fetch(`/api/v1/states?country=${country}`);
+    const r = await fetch(`/api/v1/states?country=${countryCode}`);
     const data = await r.json();
-    const sel = document.getElementById('state');
-    sel.innerHTML = '<option value="">-- All States --</option>';
     (data.states || []).forEach(s => {
-      sel.innerHTML += `<option value="${s}">${s}</option>`;
+      stateSel.innerHTML += `<option value="${s}">${s}</option>`;
     });
   } catch(e) { console.error('Failed to load states', e); }
 }
 
-/* ------ Submit search ------ */
+async function loadCities() {
+  // For future use — cities are handled server-side in the pipeline
+}
+
+function updateQueryState() {
+  const country = document.getElementById('country').value;
+  const inputs = document.querySelectorAll('#query-list input');
+  inputs.forEach(inp => {
+    inp.disabled = !!country;
+    inp.style.opacity = country ? '0.4' : '1';
+  });
+}
+
+/* ================================================================
+   CATEGORIES (searchable dropdown, 4011 items, virtual rendered)
+   ================================================================ */
+let allCategories = [];
+const MAX_VISIBLE_CATS = 80;
+
+async function loadCategories() {
+  if (categoriesLoaded) return;
+  // Use static data.js if available (instant), fall back to API
+  if (typeof CATEGORIES !== 'undefined' && CATEGORIES.length > 0) {
+    allCategories = CATEGORIES;
+    categoriesLoaded = true;
+    return;
+  }
+  try {
+    const r = await fetch('/api/v1/categories');
+    allCategories = await r.json();
+    categoriesLoaded = true;
+  } catch(e) {}
+}
+
+function openBizType() {
+  loadCategories().then(() => {
+    const el = document.getElementById('biztype-select');
+    if (!el.classList.contains('open')) {
+      el.classList.add('open');
+      document.getElementById('biz-type').setAttribute('aria-expanded', 'true');
+      renderBizTypeOptions(document.getElementById('biz-type').value);
+    }
+  });
+}
+
+function closeBizType() {
+  const el = document.getElementById('biztype-select');
+  el.classList.remove('open');
+  document.getElementById('biz-type').setAttribute('aria-expanded', 'false');
+}
+
+function onBizTypeInput(query) {
+  if (!categoriesLoaded) {
+    loadCategories().then(() => {
+      openBizType();
+      renderBizTypeOptions(query);
+    });
+    return;
+  }
+  const el = document.getElementById('biztype-select');
+  if (!el.classList.contains('open')) openBizType();
+  renderBizTypeOptions(query);
+}
+
+function renderBizTypeOptions(query) {
+  const container = document.getElementById('biztype-options');
+  const q = (query || '').toLowerCase().trim();
+
+  let filtered;
+  if (!q) {
+    filtered = allCategories.slice(0, MAX_VISIBLE_CATS);
+  } else {
+    // Prioritize starts-with, then includes
+    const starts = [];
+    const includes = [];
+    for (const c of allCategories) {
+      const label = (c.label || c.value).toLowerCase();
+      if (label.startsWith(q)) starts.push(c);
+      else if (label.includes(q)) includes.push(c);
+      if (starts.length + includes.length >= MAX_VISIBLE_CATS) break;
+    }
+    filtered = starts.concat(includes).slice(0, MAX_VISIBLE_CATS);
+  }
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="ss-empty">No matching categories</div>';
+    return;
+  }
+
+  container.innerHTML = filtered.map(c => {
+    const label = c.label || c.value;
+    return `<div class="ss-option" onclick="selectBizType('${label.replace(/'/g, "\\'")}')">${label}</div>`;
+  }).join('');
+}
+
+function selectBizType(label) {
+  document.getElementById('biz-type').value = label;
+  closeBizType();
+}
+
+// Note: biz-type dropdown is closed by the generic .searchable-select outside-click handler above
+
+/* ================================================================
+   REVIEWS TOGGLE
+   ================================================================ */
+document.getElementById('enable-reviews').addEventListener('change', function() {
+  document.getElementById('reviews-options').classList.toggle('hidden', !this.checked);
+  document.getElementById('reviews-toggle-label').textContent = this.checked ? 'Enabled' : 'Disabled';
+});
+
+function setReviewSort(btn) {
+  btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  reviewSort = btn.dataset.val;
+}
+
+/* ================================================================
+   FORM SUBMIT
+   ================================================================ */
 async function submitSearch(e) {
   e.preventDefault();
-  let body = {};
-  if (currentMode === 'quick') {
-    const q = document.getElementById('query').value.trim();
-    if (!q) return alert('Enter a search query.');
-    body.query = q;
-  } else {
-    const biz = document.getElementById('biz-type').value.trim();
-    if (!biz) return alert('Enter a business type.');
-    body.country = document.getElementById('country').value;
-    body.state = document.getElementById('state').value || null;
-    body.business_type = biz;
-    body.max_results = parseInt(document.getElementById('max-results').value) || 100;
+
+  const country = document.getElementById('country').value;
+  const queries = [...document.querySelectorAll('#query-list input')].map(i => i.value.trim()).filter(Boolean);
+
+  if (!country && queries.length === 0) {
+    return alert('Enter at least one search query or select a country.');
   }
-  body.enrichment_api_key = document.getElementById('api-key').value.trim() || null;
-  body.enable_reviews = document.getElementById('enable-reviews').value === 'true';
-  body.reviews_sort = document.getElementById('reviews-sort').value;
+
+  const body = {
+    query: queries.join('\n'),
+    country: country,
+    state: document.getElementById('state').value || '',
+    business_type: document.getElementById('biz-type').value.trim(),
+    max_results: parseInt(document.getElementById('max-results').value) || 100,
+    max_cities: parseInt(document.getElementById('max-cities').value) || null,
+    randomize_cities: document.getElementById('randomize-cities').checked,
+    lang: document.getElementById('lang').value,
+    coordinates: document.getElementById('coordinates').value.trim(),
+    zoom_level: parseFloat(document.getElementById('zoom-level').value) || 14,
+    radius_meters: parseInt(document.getElementById('radius-meters').value) || null,
+    enable_reviews: document.getElementById('enable-reviews').checked,
+    max_reviews: parseInt(document.getElementById('max-reviews').value) || 20,
+    reviews_sort: reviewSort,
+    enrichment_api_key: document.getElementById('api-key').value.trim() || '',
+    enable_ai: false,
+    skip_closed: document.getElementById('skip-closed').checked,
+    min_rating: parseFloat(document.getElementById('min-rating-filter').value) || null,
+    min_reviews: parseInt(document.getElementById('min-reviews-filter').value) || null,
+    has_website: document.getElementById('filter-has-website').checked ? true : null,
+    has_phone: document.getElementById('filter-has-phone').checked ? true : null,
+    webhook_url: document.getElementById('webhook-url').value.trim() || '',
+    error_webhook_url: document.getElementById('error-webhook-url').value.trim() || '',
+    webhook_headers: (() => {
+      const k = document.getElementById('webhook-header-key').value.trim();
+      const v = document.getElementById('webhook-header-val').value.trim();
+      return k && v ? {[k]: v} : {};
+    })(),
+    skip_existing_csv: '',
+    skip_existing_csv_data: '',
+    skip_existing_field: document.getElementById('dedup-field').value || 'place_id',
+    target_new: parseInt(document.getElementById('target-new').value) || null,
+    target_buffer: 2.0,
+    export_preset: document.getElementById('export-preset').value || '',
+    export_fields: (() => {
+      const v = document.getElementById('custom-fields').value.trim();
+      return v ? v.split(',').map(f => f.trim()).filter(Boolean) : [];
+    })(),
+  };
+
+  // Read uploaded CSV file (if any) and base64-encode it
+  const dedupFile = document.getElementById('dedup-csv').files[0];
+  if (dedupFile) {
+    try {
+      const text = await dedupFile.text();
+      body.skip_existing_csv_data = btoa(unescape(encodeURIComponent(text)));
+    } catch (err) {
+      return alert('Failed to read existing leads file: ' + err.message);
+    }
+  }
+
+  if (country && !body.business_type) {
+    return alert('Enter a business type when using country extraction.');
+  }
+
+  // Warn if estimated total exceeds threshold
+  const estimated = body.max_results * (body.max_cities || 1);
+  if (estimated > 1000) {
+    if (!confirm(`This job will scrape up to ${estimated.toLocaleString()} places. Continue?`)) {
+      return;
+    }
+  }
 
   try {
     const r = await fetch('/api/v1/scrape', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const data = await r.json();
+    if (!r.ok) {
+      return alert(data.detail || `Request failed: ${r.status}`);
+    }
     if (data.job_id) {
-      connectWS(data.job_id);
+      switchTab('output');
+      connectSSE(data.job_id);
     }
   } catch(err) { alert('Request failed: ' + err.message); }
 }
 
-/* ------ WebSocket progress ------ */
-function connectWS(jobId) {
+function resetForm() {
+  document.getElementById('search-form').reset();
+  document.getElementById('country').value = '';
+  document.getElementById('country-display').value = '';
+  document.getElementById('state').innerHTML = '<option value="">-- All --</option>';
+  document.getElementById('reviews-options').classList.add('hidden');
+  document.getElementById('reviews-toggle-label').textContent = 'Disabled';
+  document.querySelectorAll('.seg-group button').forEach((b,i) => b.classList.toggle('active', i===0));
+  reviewSort = 'newest';
+  updateQueryState();
+}
+
+/* ================================================================
+   SSE PROGRESS (replaces WebSocket)
+   ================================================================ */
+function connectSSE(jobId) {
   const card = document.getElementById('progress-card');
   card.classList.remove('hidden');
   document.getElementById('progress-job-id').textContent = jobId.slice(0,8);
   document.getElementById('progress-bar').style.width = '0%';
+  document.getElementById('progress-bar').classList.add('active');
   document.getElementById('progress-text').textContent = 'Starting...';
   document.getElementById('progress-detail').textContent = '';
 
-  if (wsConn) wsConn.close();
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  wsConn = new WebSocket(`${proto}://${location.host}/api/v1/ws/${jobId}`);
+  if (sseSource) sseSource.close();
+  sseSource = new EventSource(`/api/v1/progress/${jobId}`);
 
-  const startTime = Date.now();
-
-  wsConn.onmessage = (evt) => {
+  sseSource.onmessage = function(evt) {
     try {
       const msg = JSON.parse(evt.data);
+
       if (msg.type === 'progress') {
-        const pct = msg.total > 0 ? Math.round((msg.completed / msg.total) * 100) : 0;
+        const pct = Math.round(msg.percent || 0);
         document.getElementById('progress-bar').style.width = pct + '%';
-        document.getElementById('progress-text').textContent = `${pct}% (${msg.completed}/${msg.total})`;
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
-        let eta = '';
-        if (msg.completed > 0 && msg.total > msg.completed) {
-          const rate = (Date.now() - startTime) / msg.completed;
-          eta = ' | ETA: ' + Math.round((msg.total - msg.completed) * rate / 1000) + 's';
-        }
+        document.getElementById('progress-text').textContent = `${pct}% (${msg.places_scraped}/${msg.total_places_found || '?'})`;
+        const elapsed = Math.round(msg.elapsed || 0);
+        const eta = msg.eta_seconds > 0 ? ` | ETA: ${Math.round(msg.eta_seconds)}s` : '';
         document.getElementById('progress-detail').textContent =
-          `${msg.completed}/${msg.total} places scraped | Elapsed: ${elapsed}s${eta}`;
+          `${msg.completed_queries}/${msg.total_queries} queries | ${msg.places_scraped} places | Elapsed: ${elapsed}s${eta}`;
       } else if (msg.type === 'completed') {
         document.getElementById('progress-bar').style.width = '100%';
+        document.getElementById('progress-bar').classList.remove('active');
         document.getElementById('progress-text').textContent = 'Done!';
         loadJobResults(jobId);
-        wsConn.close();
+        sseSource.close();
+        sseSource = null;
       } else if (msg.type === 'error') {
-        document.getElementById('progress-text').textContent = 'Error: ' + (msg.message || 'Unknown');
+        document.getElementById('progress-bar').classList.remove('active');
+        document.getElementById('progress-text').textContent = 'Error: ' + (msg.error || 'Unknown');
+        sseSource.close();
+        sseSource = null;
+      } else if (msg.type === 'retrying') {
+        document.getElementById('progress-bar').classList.add('active');
+        document.getElementById('progress-text').textContent =
+          `Retry ${msg.attempt}/${msg.max_retries} in ${msg.retry_in}s...`;
+        document.getElementById('progress-detail').textContent =
+          `Attempt ${msg.attempt} failed. Retrying automatically.`;
+      } else if (msg.type === 'cancelled') {
+        document.getElementById('progress-bar').classList.remove('active');
+        document.getElementById('progress-text').textContent = 'Cancelled';
+        sseSource.close();
+        sseSource = null;
       }
     } catch(e) {}
   };
-  wsConn.onerror = () => {};
-  wsConn.onclose = () => { wsConn = null; };
+
+  sseSource.onerror = function() {
+    sseSource.close();
+    sseSource = null;
+  };
 }
 
-/* ------ Load job results ------ */
+/* ================================================================
+   JOBS LIST
+   ================================================================ */
 async function loadJobResults(jobId) {
   try {
     const r = await fetch(`/api/v1/jobs/${jobId}`);
@@ -256,80 +1235,163 @@ async function loadJobResults(jobId) {
   } catch(e) { console.error('Failed to load results', e); }
 }
 
-/* ------ Render results table ------ */
-function showResults(jobId, results) {
-  allResults = results;
-  const card = document.getElementById('results-card');
-  card.classList.remove('hidden');
-  document.getElementById('results-job-id').textContent = jobId.slice(0,8);
-  document.getElementById('dl-csv').href = `/api/v1/jobs/${jobId}/download?format=csv`;
-  document.getElementById('dl-json').href = `/api/v1/jobs/${jobId}/download?format=json`;
-  renderTable(allResults);
-}
-
-function renderTable(data) {
-  const thead = document.getElementById('results-thead');
-  const tbody = document.getElementById('results-tbody');
-  thead.innerHTML = '<tr>' + COLUMNS.map(c =>
-    `<th onclick="sortBy('${c}')">${c}<span class="sort-arrow">${sortCol===c?(sortAsc?'&#9650;':'&#9660;'):''}</span></th>`
-  ).join('') + '</tr>';
-
-  tbody.innerHTML = data.map(row =>
-    '<tr>' + COLUMNS.map(c => {
-      let v = row[c] != null ? row[c] : '';
-      if (c === 'website' && v) v = `<a href="${v}" target="_blank" rel="noopener">${v}</a>`;
-      return `<td title="${String(row[c]||'').replace(/"/g,'&quot;')}">${v}</td>`;
-    }).join('') + '</tr>'
-  ).join('');
-
-  document.getElementById('results-count').textContent = data.length + ' results';
-}
-
-/* ------ Client-side sort ------ */
-function sortBy(col) {
-  if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
-  const sorted = [...allResults].sort((a,b) => {
-    let va = a[col], vb = b[col];
-    if (va == null) va = '';
-    if (vb == null) vb = '';
-    if (typeof va === 'number' && typeof vb === 'number') return sortAsc ? va-vb : vb-va;
-    return sortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
-  });
-  renderTable(sorted);
-}
-
-/* ------ Client-side filter ------ */
-function filterResults() {
-  const q = document.getElementById('results-filter').value.toLowerCase();
-  if (!q) { renderTable(allResults); return; }
-  const filtered = allResults.filter(row =>
-    COLUMNS.some(c => String(row[c]||'').toLowerCase().includes(q))
-  );
-  renderTable(filtered);
-}
-
-/* ------ Poll jobs ------ */
 async function pollJobs() {
   try {
     const r = await fetch('/api/v1/jobs');
-    const data = await r.json();
+    const jobs = await r.json();
     const list = document.getElementById('jobs-list');
-    const jobs = data.jobs || [];
-    if (jobs.length === 0) { list.innerHTML = '<span class="text-dim text-sm">No jobs yet.</span>'; return; }
+    if (!jobs || jobs.length === 0) { list.innerHTML = '<span class="text-dim text-sm">No tasks yet.</span>'; return; }
+
+    // Sort by created_at descending
+    jobs.sort((a,b) => (b.created_at||0) - (a.created_at||0));
+
     list.innerHTML = jobs.map(j => {
       const statusClass = j.status === 'completed' ? 'badge-completed' :
                           j.status === 'running' ? 'badge-running' :
                           j.status === 'failed' ? 'badge-failed' : 'badge-created';
-      const label = (j.params && j.params.query) || j.id.slice(0,8);
-      return `<div class="job-item" onclick="loadJobResults('${j.id}')">
-        <span>${label}</span>
-        <span class="badge ${statusClass}">${j.status}</span>
+      const label = j.job_id.slice(0,8);
+      const count = j.total_results || 0;
+      const elapsed = j.progress ? Math.round(j.progress.elapsed || 0) + 's' : '';
+      return `<div class="job-item" onclick="loadJobResults('${j.job_id}')">
+        <span>Task ${label}</span>
+        <div class="job-meta">
+          <span class="text-xs text-dim">${count} results${elapsed ? ' | ' + elapsed : ''}</span>
+          <span class="badge ${statusClass}">${j.status}</span>
+        </div>
       </div>`;
     }).join('');
   } catch(e) {}
 }
 
-/* ------ Health check ------ */
+/* ================================================================
+   RESULTS DISPLAY
+   ================================================================ */
+function showResults(jobId, results) {
+  allResults = results;
+  filteredResults = results;
+  currentPage = 1;
+  const card = document.getElementById('results-card');
+  card.classList.remove('hidden');
+  document.getElementById('results-job-id').textContent = jobId.slice(0,8);
+  document.getElementById('dl-csv').href = `/api/v1/jobs/${jobId}/download?format=csv`;
+  document.getElementById('dl-json').href = `/api/v1/jobs/${jobId}/download?format=json`;
+  document.getElementById('sort-select').value = '';
+  applyFilters();
+}
+
+/* ================================================================
+   FILTERS + SORT
+   ================================================================ */
+function toggleFilters() {
+  const panel = document.getElementById('filters-panel');
+  const btn = document.getElementById('toggle-filters-btn');
+  const isOpen = panel.classList.contains('open');
+  panel.classList.toggle('open');
+  btn.textContent = isOpen ? 'Show Filters' : 'Hide Filters';
+}
+
+function applyFilters() {
+  let data = [...allResults];
+
+  const minRev = parseInt(document.getElementById('f-min-reviews').value);
+  const maxRev = parseInt(document.getElementById('f-max-reviews').value);
+  const minRat = parseFloat(document.getElementById('f-min-rating').value);
+  const hasWeb = document.getElementById('f-has-website').checked;
+  const hasPhone = document.getElementById('f-has-phone').checked;
+  const hasAds = document.getElementById('f-has-ads').checked;
+  const canClaim = document.getElementById('f-can-claim').checked;
+  const search = document.getElementById('f-search').value.toLowerCase();
+
+  if (!isNaN(minRev)) data = data.filter(r => (r.reviews||0) >= minRev);
+  if (!isNaN(maxRev)) data = data.filter(r => (r.reviews||0) <= maxRev);
+  if (!isNaN(minRat)) data = data.filter(r => (r.rating||0) >= minRat);
+  if (hasWeb) data = data.filter(r => r.website);
+  if (hasPhone) data = data.filter(r => r.phone);
+  if (hasAds) data = data.filter(r => r.is_spending_on_ads);
+  if (canClaim) data = data.filter(r => r.can_claim);
+  if (search) data = data.filter(r => COLUMNS.some(c => String(r[c]||'').toLowerCase().includes(search)));
+
+  filteredResults = data;
+  applySort();
+}
+
+function applySort() {
+  const val = document.getElementById('sort-select').value;
+  let data = [...filteredResults];
+  if (val === 'reviews-desc') data.sort((a,b) => (b.reviews||0) - (a.reviews||0));
+  else if (val === 'reviews-asc') data.sort((a,b) => (a.reviews||0) - (b.reviews||0));
+  else if (val === 'rating-desc') data.sort((a,b) => (b.rating||0) - (a.rating||0));
+  else if (val === 'rating-asc') data.sort((a,b) => (a.rating||0) - (b.rating||0));
+  else if (val === 'name-asc') data.sort((a,b) => String(a.name||'').localeCompare(b.name||''));
+  filteredResults = data;
+  currentPage = 1;
+  renderPage();
+}
+
+/* ================================================================
+   TABLE RENDERING + PAGINATION
+   ================================================================ */
+function renderPage() {
+  const total = filteredResults.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (currentPage > totalPages) currentPage = totalPages;
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageData = filteredResults.slice(start, start + PAGE_SIZE);
+
+  document.getElementById('results-count').textContent = `${total} results`;
+
+  // Thead
+  const thead = document.getElementById('results-thead');
+  thead.innerHTML = '<tr>' + COLUMNS.map(c =>
+    `<th>${c.replace(/_/g,' ')}</th>`
+  ).join('') + '</tr>';
+
+  // Tbody
+  const tbody = document.getElementById('results-tbody');
+  tbody.innerHTML = pageData.map(row =>
+    '<tr>' + COLUMNS.map(c => {
+      let v = row[c] != null ? row[c] : '';
+      if (c === 'website' && v) v = `<a href="${v}" target="_blank" rel="noopener">${new URL(v).hostname}</a>`;
+      else if (typeof v === 'boolean') v = v ? 'Yes' : 'No';
+      return `<td title="${String(row[c]||'').replace(/"/g,'&quot;')}">${v}</td>`;
+    }).join('') + '</tr>'
+  ).join('');
+
+  // Pagination
+  renderPagination(totalPages);
+}
+
+function renderPagination(totalPages) {
+  const el = document.getElementById('pagination');
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+
+  let html = `<button ${currentPage<=1?'disabled':''} onclick="goPage(${currentPage-1})" aria-label="Previous page">&laquo;</button>`;
+  // Show max 7 page buttons
+  let pages = [];
+  if (totalPages <= 7) {
+    for (let i=1; i<=totalPages; i++) pages.push(i);
+  } else {
+    pages = [1];
+    let lo = Math.max(2, currentPage - 2);
+    let hi = Math.min(totalPages - 1, currentPage + 2);
+    if (lo > 2) pages.push('...');
+    for (let i=lo; i<=hi; i++) pages.push(i);
+    if (hi < totalPages - 1) pages.push('...');
+    pages.push(totalPages);
+  }
+  pages.forEach(p => {
+    if (p === '...') html += '<span class="text-dim" style="padding:0.4rem 0.3rem">...</span>';
+    else html += `<button class="${p===currentPage?'active':''}" onclick="goPage(${p})" aria-label="Page ${p}">${p}</button>`;
+  });
+  html += `<button ${currentPage>=totalPages?'disabled':''} onclick="goPage(${currentPage+1})" aria-label="Next page">&raquo;</button>`;
+  el.innerHTML = html;
+}
+
+function goPage(n) { currentPage = n; renderPage(); }
+
+/* ================================================================
+   HEALTH CHECK
+   ================================================================ */
 async function checkHealth() {
   try {
     const r = await fetch('/api/v1/health');
@@ -340,12 +1402,391 @@ async function checkHealth() {
   }
 }
 
-/* ------ Init ------ */
+/* ================================================================
+   SETTINGS
+   ================================================================ */
+/* ================================================================
+   PRESETS
+   ================================================================ */
+const PRESETS = {
+  conservative: {
+    browser: 'patchright',
+    concurrency: 2, min_delay: 1.0, max_delay: 4.0, scroll_timeout: 60,
+    max_results_per_query: 50, max_cities_per_job: 20, max_total_places: 500,
+    max_concurrent_jobs: 1, max_runtime_minutes: 60, warn_threshold: 100,
+  },
+  balanced: {
+    browser: 'patchright',
+    concurrency: 5, min_delay: 0.5, max_delay: 2.0, scroll_timeout: 40,
+    max_results_per_query: 500, max_cities_per_job: 50, max_total_places: 5000,
+    max_concurrent_jobs: 3, max_runtime_minutes: 120, warn_threshold: 1000,
+  },
+  aggressive: {
+    browser: 'patchright',
+    concurrency: 10, min_delay: 0.2, max_delay: 1.0, scroll_timeout: 30,
+    max_results_per_query: 5000, max_cities_per_job: 200, max_total_places: 10000,
+    max_concurrent_jobs: 5, max_runtime_minutes: 240, warn_threshold: 2000,
+  },
+  leadgen: {
+    browser: 'patchright',
+    concurrency: 3, min_delay: 1.0, max_delay: 3.0, scroll_timeout: 50,
+    max_results_per_query: 200, max_cities_per_job: 30, max_total_places: 1000,
+    max_concurrent_jobs: 2, max_runtime_minutes: 90, warn_threshold: 500,
+  },
+};
+
+/* ================================================================
+   SCHEDULES
+   ================================================================ */
+async function loadSchedules() {
+  try {
+    const r = await fetch('/api/v1/schedules');
+    const schedules = await r.json();
+    const list = document.getElementById('schedules-list');
+    if (!schedules.length) {
+      list.innerHTML = '<span class="text-dim text-sm">No schedules yet. Click + New Schedule to create one.</span>';
+      return;
+    }
+    list.innerHTML = schedules.map(s => {
+      const lastRun = s.last_run ? new Date(s.last_run * 1000).toLocaleString() : 'Never';
+      const statusClass = s.last_status === 'success' ? 'badge-completed' :
+                          s.last_status === 'failed' ? 'badge-failed' : 'badge-created';
+      const enabledIcon = s.enabled ? '✓' : '✗';
+      return `<div class="job-item">
+        <div>
+          <span style="font-weight:500">${enabledIcon} ${escapeHtml(s.name)}</span>
+          <span class="text-xs text-dim" style="margin-left:0.5rem">${escapeHtml(s.cron)}</span>
+          <span class="text-xs text-dim" style="margin-left:0.5rem">Last: ${lastRun}</span>
+          ${s.last_status ? `<span class="badge ${statusClass}">${s.last_status}</span>` : ''}
+        </div>
+        <div class="job-meta">
+          <button class="btn btn-sm btn-ghost" onclick="runScheduleNow('${s.id}')">Run Now</button>
+          <button class="btn btn-sm btn-ghost" onclick="editSchedule('${s.id}')">Edit</button>
+          <button class="btn btn-sm btn-ghost" onclick="deleteSchedule('${s.id}')">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    console.error('Failed to load schedules', e);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function openScheduleEditor() {
+  document.getElementById('schedule-editor').classList.remove('hidden');
+  document.getElementById('schedule-editor-title').textContent = 'New Schedule';
+  document.getElementById('sch-id').value = '';
+  document.getElementById('sch-name').value = '';
+  document.getElementById('sch-enabled').checked = true;
+  document.getElementById('sch-cron').value = '0 8 * * 1';
+  document.getElementById('sch-query').value = '';
+  document.getElementById('sch-country').value = '';
+  document.getElementById('sch-state').value = '';
+  document.getElementById('sch-biz').value = '';
+  document.getElementById('sch-max-results').value = 100;
+  document.getElementById('sch-max-cities').value = '';
+  document.getElementById('sch-target-new').value = '';
+  document.getElementById('sch-skip-closed').checked = true;
+  document.getElementById('sch-enable-reviews').checked = false;
+  document.getElementById('sch-enable-ai').checked = false;
+  document.getElementById('sch-webhook').value = '';
+}
+
+function closeScheduleEditor() {
+  document.getElementById('schedule-editor').classList.add('hidden');
+}
+
+function setCronPreset(cron) {
+  document.getElementById('sch-cron').value = cron;
+}
+
+async function editSchedule(id) {
+  const r = await fetch('/api/v1/schedules');
+  const schedules = await r.json();
+  const s = schedules.find(x => x.id === id);
+  if (!s) return alert('Schedule not found');
+
+  openScheduleEditor();
+  document.getElementById('schedule-editor-title').textContent = 'Edit Schedule';
+  document.getElementById('sch-id').value = s.id;
+  document.getElementById('sch-name').value = s.name || '';
+  document.getElementById('sch-enabled').checked = s.enabled !== false;
+  document.getElementById('sch-cron').value = s.cron || '';
+
+  const p = s.params || {};
+  document.getElementById('sch-query').value = p.query || '';
+  document.getElementById('sch-country').value = p.country || '';
+  document.getElementById('sch-state').value = p.state || '';
+  document.getElementById('sch-biz').value = p.business_type || '';
+  document.getElementById('sch-max-results').value = p.max_results || 100;
+  document.getElementById('sch-max-cities').value = p.max_cities || '';
+  document.getElementById('sch-target-new').value = p.target_new || '';
+  document.getElementById('sch-skip-closed').checked = !!p.skip_closed;
+  document.getElementById('sch-enable-reviews').checked = !!p.enable_reviews;
+  document.getElementById('sch-enable-ai').checked = !!p.enable_ai;
+  document.getElementById('sch-webhook').value = p.webhook_url || '';
+}
+
+async function saveSchedule() {
+  const id = document.getElementById('sch-id').value;
+  const status = document.getElementById('schedule-status');
+  status.textContent = 'Saving...';
+
+  const body = {
+    name: document.getElementById('sch-name').value.trim(),
+    cron: document.getElementById('sch-cron').value.trim(),
+    enabled: document.getElementById('sch-enabled').checked,
+    params: {
+      query: document.getElementById('sch-query').value.trim(),
+      country: document.getElementById('sch-country').value.trim().toUpperCase(),
+      state: document.getElementById('sch-state').value.trim(),
+      business_type: document.getElementById('sch-biz').value.trim(),
+      max_results: parseInt(document.getElementById('sch-max-results').value) || 100,
+      max_cities: parseInt(document.getElementById('sch-max-cities').value) || null,
+      target_new: parseInt(document.getElementById('sch-target-new').value) || null,
+      skip_closed: document.getElementById('sch-skip-closed').checked,
+      enable_reviews: document.getElementById('sch-enable-reviews').checked,
+      enable_ai: document.getElementById('sch-enable-ai').checked,
+      webhook_url: document.getElementById('sch-webhook').value.trim() || '',
+    },
+  };
+
+  if (!body.name || !body.cron) {
+    status.textContent = 'Name and cron are required';
+    return;
+  }
+
+  try {
+    const url = id ? `/api/v1/schedules/${id}` : '/api/v1/schedules';
+    const method = id ? 'PUT' : 'POST';
+    const r = await fetch(url, {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    if (!r.ok) {
+      const data = await r.json();
+      status.textContent = data.detail || 'Save failed';
+      return;
+    }
+    status.textContent = 'Saved!';
+    closeScheduleEditor();
+    loadSchedules();
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+  }
+}
+
+async function deleteSchedule(id) {
+  if (!confirm('Delete this schedule?')) return;
+  await fetch(`/api/v1/schedules/${id}`, {method: 'DELETE'});
+  loadSchedules();
+}
+
+async function runScheduleNow(id) {
+  const r = await fetch(`/api/v1/schedules/${id}/run`, {method: 'POST'});
+  const data = await r.json();
+  if (data.job_id) {
+    alert(`Job started: ${data.job_id.slice(0, 8)}. Check the Output tab.`);
+    switchTab('output');
+    connectSSE(data.job_id);
+  }
+}
+
+function applyPreset(name) {
+  const p = PRESETS[name];
+  if (!p) return;
+  // Scraping
+  document.getElementById('s-browser').value = p.browser;
+  document.getElementById('s-concurrency').value = p.concurrency;
+  document.getElementById('s-min-delay').value = p.min_delay;
+  document.getElementById('s-max-delay').value = p.max_delay;
+  document.getElementById('s-scroll-timeout').value = p.scroll_timeout;
+  // Limits
+  document.getElementById('s-max-results-per-query').value = p.max_results_per_query;
+  document.getElementById('s-max-cities-per-job').value = p.max_cities_per_job;
+  document.getElementById('s-max-total-places').value = p.max_total_places;
+  document.getElementById('s-max-concurrent-jobs').value = p.max_concurrent_jobs;
+  document.getElementById('s-max-runtime-minutes').value = p.max_runtime_minutes;
+  document.getElementById('s-warn-threshold').value = p.warn_threshold;
+
+  const status = document.getElementById('settings-status');
+  status.textContent = `${name} preset applied — click Save Settings to persist`;
+  setTimeout(() => { if (status.textContent.includes('preset')) status.textContent = ''; }, 5000);
+}
+
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/v1/settings');
+    const s = await r.json();
+    if (!s || Object.keys(s).length === 0) return;
+
+    // Scraping
+    const sc = s.scraping || {};
+    if (sc.browser) document.getElementById('s-browser').value = sc.browser;
+    if (sc.concurrency) document.getElementById('s-concurrency').value = sc.concurrency;
+    if (sc.min_delay != null) document.getElementById('s-min-delay').value = sc.min_delay;
+    if (sc.max_delay != null) document.getElementById('s-max-delay').value = sc.max_delay;
+    if (sc.scroll_timeout) document.getElementById('s-scroll-timeout').value = sc.scroll_timeout;
+    document.getElementById('s-headless').checked = sc.headless !== false;
+
+    // Proxy
+    const p = s.proxy || {};
+    if (p.urls && p.urls.length) document.getElementById('s-proxy-urls').value = p.urls.join('\n');
+    if (p.rotation) document.getElementById('s-proxy-rotation').value = p.rotation;
+
+    // Enrichment
+    const e = s.enrichment || {};
+    if (e.provider) document.getElementById('s-enrich-provider').value = e.provider;
+    if (e.api_key) document.getElementById('s-enrich-key').value = e.api_key;
+
+    // AI
+    const a = s.ai || {};
+    if (a.provider) document.getElementById('s-ai-provider').value = a.provider;
+    if (a.api_key) document.getElementById('s-ai-key').value = a.api_key;
+    if (a.model) document.getElementById('s-ai-model').value = a.model;
+    if (a.base_url) document.getElementById('s-ai-baseurl').value = a.base_url;
+    if (a.icp) document.getElementById('s-ai-icp').value = a.icp;
+    if (a.product_description) document.getElementById('s-ai-product').value = a.product_description;
+
+    // Webhooks
+    const w = s.webhooks || {};
+    if (w.urls && w.urls.length) document.getElementById('s-webhook-urls').value = w.urls.join('\n');
+    if (w.error_url) document.getElementById('s-error-webhook').value = w.error_url;
+    if (w.heartbeat_url) document.getElementById('s-heartbeat-url').value = w.heartbeat_url;
+    if (w.heartbeat_interval) document.getElementById('s-heartbeat-interval').value = w.heartbeat_interval;
+
+    // Limits
+    const lim = s.limits || {};
+    if (lim.max_results_per_query) document.getElementById('s-max-results-per-query').value = lim.max_results_per_query;
+    if (lim.max_cities_per_job) document.getElementById('s-max-cities-per-job').value = lim.max_cities_per_job;
+    if (lim.max_total_places) document.getElementById('s-max-total-places').value = lim.max_total_places;
+    if (lim.max_concurrent_jobs) document.getElementById('s-max-concurrent-jobs').value = lim.max_concurrent_jobs;
+    if (lim.max_runtime_minutes) document.getElementById('s-max-runtime-minutes').value = lim.max_runtime_minutes;
+    if (lim.warn_threshold) document.getElementById('s-warn-threshold').value = lim.warn_threshold;
+  } catch(e) {}
+}
+
+async function testNotification() {
+  const url = document.getElementById('s-error-webhook').value.trim();
+  const status = document.getElementById('test-notification-status');
+  if (!url) {
+    status.textContent = 'Enter a URL first';
+    return;
+  }
+  status.textContent = 'Sending...';
+  try {
+    const r = await fetch('/api/v1/test-notification', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url}),
+    });
+    const data = await r.json();
+    if (data.success) {
+      status.textContent = `✓ Sent (provider: ${data.provider})`;
+    } else {
+      status.textContent = `✗ Failed (provider: ${data.provider}) — check URL`;
+    }
+    setTimeout(() => { status.textContent = ''; }, 8000);
+  } catch(e) {
+    status.textContent = '✗ Error: ' + e.message;
+  }
+}
+
+async function saveSettings() {
+  const status = document.getElementById('settings-status');
+  status.textContent = 'Saving...';
+
+  const proxyUrls = document.getElementById('s-proxy-urls').value.split('\n').map(u => u.trim()).filter(Boolean);
+  const webhookUrls = document.getElementById('s-webhook-urls').value.split('\n').map(u => u.trim()).filter(Boolean);
+  const aiProvider = document.getElementById('s-ai-provider').value;
+
+  const settings = {
+    scraping: {
+      browser: document.getElementById('s-browser').value,
+      concurrency: parseInt(document.getElementById('s-concurrency').value) || 5,
+      min_delay: parseFloat(document.getElementById('s-min-delay').value) || 0.5,
+      max_delay: parseFloat(document.getElementById('s-max-delay').value) || 2.0,
+      scroll_timeout: parseInt(document.getElementById('s-scroll-timeout').value) || 40,
+      headless: document.getElementById('s-headless').checked,
+    },
+    proxy: {
+      urls: proxyUrls,
+      rotation: document.getElementById('s-proxy-rotation').value,
+    },
+    enrichment: {
+      provider: document.getElementById('s-enrich-provider').value,
+      api_key: document.getElementById('s-enrich-key').value.trim(),
+    },
+    ai: {
+      enabled: !!aiProvider,
+      provider: aiProvider,
+      api_key: document.getElementById('s-ai-key').value.trim(),
+      model: document.getElementById('s-ai-model').value.trim(),
+      base_url: document.getElementById('s-ai-baseurl').value.trim(),
+      icp: document.getElementById('s-ai-icp').value.trim(),
+      product_description: document.getElementById('s-ai-product').value.trim(),
+    },
+    webhooks: {
+      urls: webhookUrls,
+      error_url: document.getElementById('s-error-webhook').value.trim(),
+      heartbeat_url: document.getElementById('s-heartbeat-url').value.trim(),
+      heartbeat_interval: parseInt(document.getElementById('s-heartbeat-interval').value) || 300,
+    },
+    limits: {
+      max_results_per_query: parseInt(document.getElementById('s-max-results-per-query').value) || 5000,
+      max_cities_per_job: parseInt(document.getElementById('s-max-cities-per-job').value) || 200,
+      max_total_places: parseInt(document.getElementById('s-max-total-places').value) || 10000,
+      max_concurrent_jobs: parseInt(document.getElementById('s-max-concurrent-jobs').value) || 3,
+      max_runtime_minutes: parseInt(document.getElementById('s-max-runtime-minutes').value) || 120,
+      warn_threshold: parseInt(document.getElementById('s-warn-threshold').value) || 1000,
+    },
+  };
+
+  try {
+    const r = await fetch('/api/v1/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(settings),
+    });
+    const data = await r.json();
+    status.textContent = data.status === 'saved' ? 'Saved!' : 'Error';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  } catch(e) {
+    status.textContent = 'Failed to save.';
+  }
+}
+
+/* ================================================================
+   THEME TOGGLE
+   ================================================================ */
+function toggleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute('data-theme');
+  const next = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('mapo-theme', next);
+}
+
+function loadTheme() {
+  const saved = localStorage.getItem('mapo-theme');
+  if (saved) {
+    document.documentElement.setAttribute('data-theme', saved);
+  }
+}
+
+/* ================================================================
+   INIT
+   ================================================================ */
+loadTheme();
+initCountrySelect();
 checkHealth();
-loadStates();
 pollJobs();
-pollTimer = setInterval(pollJobs, 2000);
+loadSettings();
+pollTimer = setInterval(pollJobs, 3000);
 setInterval(checkHealth, 15000);
+
+// Pre-load categories in background after page load
+setTimeout(loadCategories, 1000);
 </script>
 </body>
 </html>

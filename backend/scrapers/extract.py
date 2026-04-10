@@ -22,12 +22,59 @@ def safe_get(data, *keys):
 
 
 def parse_app_state(data):
-    """Parse the APP_INITIALIZATION_STATE JSON string."""
-    raw = json.loads(data)[3][6]
-    prefix = ")]}'"
-    if raw.startswith(prefix):
-        raw = raw[len(prefix):]
-    return json.loads(raw)
+    """Parse place data from either the preview endpoint or APP_INITIALIZATION_STATE.
+
+    Handles multiple formats as Google's structure evolves:
+    1. Preview endpoint: flat array where [6] has 100+ element place data
+    2. Old APP_INITIALIZATION_STATE: nested at [3][6] as an escaped JSON string
+    3. New APP_INITIALIZATION_STATE: nested at [3][5] as an escaped JSON string
+    """
+    parsed = json.loads(data)
+
+    # Format 1: preview endpoint — [6] is directly the place data array
+    if isinstance(parsed, list) and len(parsed) > 6 and isinstance(parsed[6], list) and len(parsed[6]) > 50:
+        return parsed
+
+    # Format 2/3: APP_INITIALIZATION_STATE — data is an escaped string inside [3]
+    if isinstance(parsed, list) and len(parsed) > 3 and isinstance(parsed[3], list):
+        # Try each index in [3] for an escaped JSON string containing place data
+        for idx in (6, 5, -1):
+            raw = safe_get(parsed, 3, idx)
+            if not isinstance(raw, str):
+                continue
+            prefix = ")]}'"
+            if raw.startswith(prefix):
+                raw = raw[len(prefix) + 1:]  # skip prefix + newline
+            try:
+                inner = json.loads(raw)
+                # Check if this inner JSON has a [6] with 50+ elements (place data)
+                if isinstance(inner, list) and len(inner) > 6 and isinstance(safe_get(inner, 6), list) and len(inner[6]) > 50:
+                    return inner
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+    # Fallback: search all nested arrays for one with 100+ elements (the place data)
+    def _find_place_data(obj, depth=0):
+        if depth > 4 or not isinstance(obj, list):
+            return None
+        if len(obj) > 80 and isinstance(safe_get(obj, 11), (str, type(None))):
+            # Looks like place data — verify with a few known indices
+            if safe_get(obj, 78) is not None or safe_get(obj, 9) is not None:
+                return {"6": obj}  # Wrap so extract_data can access it at [6]
+        for item in obj:
+            result = _find_place_data(item, depth + 1)
+            if result:
+                return result
+        return None
+
+    found = _find_place_data(parsed)
+    if found:
+        # Return a structure where [6] is the place data
+        result = [None] * 7
+        result[6] = found["6"]
+        return result
+
+    raise IndexError("Could not find place data in any known format")
 
 
 def parse_possible_map_link(data):
@@ -248,7 +295,7 @@ def extract_data(input_str, link):
     for section in about_raw:
         section_name = safe_get(section, 0)
         items = safe_get(section, 2) or []
-        if section_name:
+        if section_name and isinstance(section_name, str):
             about[section_name] = [safe_get(item, 1) for item in items if safe_get(item, 1)]
 
     # Service options (dine-in, takeout, delivery, etc.)

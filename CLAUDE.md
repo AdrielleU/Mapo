@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Mapo is a Google Maps business data scraper with enrichment, detection, AI analysis, and multi-target output. Built on FastAPI with Camoufox/Playwright for stealth browser automation and asyncio for concurrency. Supports web UI, REST API, CLI, webhooks, and cron scheduling.
+Mapo is a Google Maps business data scraper with enrichment, detection, AI analysis, and multi-target output. Built on FastAPI with dual browser backends (Camoufox Firefox + Patchright Chromium) for stealth automation and asyncio for concurrency. Supports web UI, REST API, CLI, webhooks, and cron scheduling.
 
 Derived from [omkarcloud/google-maps-scraper](https://github.com/omkarcloud/google-maps-scraper), rebuilt with a modular architecture.
 
@@ -12,7 +12,7 @@ Derived from [omkarcloud/google-maps-scraper](https://github.com/omkarcloud/goog
 # Set up venv
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-python -m playwright install firefox
+python -m playwright install firefox chromium
 
 # Run web UI + API server (single port)
 python run.py
@@ -53,7 +53,7 @@ run.py                              # Entry point: CLI dispatch or FastAPI serve
 │   ├── cli.py                      # CLI interface (scrape/enrich subcommands)
 │   ├── server.py                   # FastAPI app, WebSocket progress, job mgmt
 │   ├── scrapers/
-│   │   ├── places.py               # Camoufox+HTTP hybrid scraper with anti-detection
+│   │   ├── places.py               # Stealth browser + HTTP hybrid scraper (Camoufox/Patchright)
 │   │   ├── extract.py              # Parses APP_INITIALIZATION_STATE JSON
 │   │   ├── reviews.py              # Google Maps internal review API (parallel=40)
 │   │   ├── social.py               # Pluggable enrichment integration
@@ -119,7 +119,7 @@ WS   /api/v1/ws/{job_id}     — real-time progress updates
 
 1. Query submitted (UI / API / CLI / scheduler)
 2. Server splits into sub-tasks (per query or per city via state data)
-3. `places.scrape_places()` — Camoufox (stealth Firefox) scrolls results
+3. `places.scrape_places()` — stealth browser (Camoufox or Patchright) scrolls results
 4. `places.scrape_place()` — parallel HTTP (x5) fetches individual pages
 5. `extract.extract_data()` — parses Google's APP_INITIALIZATION_STATE
 6. (Optional) `enrichment` — pluggable provider for emails/social
@@ -140,7 +140,7 @@ WS   /api/v1/ws/{job_id}     — real-time progress updates
 ## Tech Stack
 
 - Python 3.12+, FastAPI, uvicorn, Pydantic
-- Camoufox + Playwright (stealth Firefox automation)
+- Camoufox (stealth Firefox) + Patchright (stealth Chromium) via Playwright
 - httpx (HTTP/2), lxml, regex, APScheduler, rich
 - asyncio throughout, WebSocket for real-time progress
 - Frontend: vanilla HTML/CSS/JS (no build step, no Node.js)
