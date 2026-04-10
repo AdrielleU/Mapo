@@ -14,5 +14,7 @@ local_storage.json
 db.sqlite3
 .DS_Store
 .history/
-data/
+# Top-level runtime data only — don't ignore backend/data/ Python modules
+/data/
+!backend/data/
 *.db
