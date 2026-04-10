@@ -39,11 +39,9 @@ def _build_slack_payload(event_type: str, payload: dict) -> dict:
     ts = payload.get("timestamp", "")
 
     if event_type == "task.completed":
-        color = "#36a64f"
         title = "Scrape Completed"
         emoji = ":white_check_mark:"
     else:
-        color = "#ff0000"
         title = "Scrape Failed"
         emoji = ":x:"
 

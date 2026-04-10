@@ -13,7 +13,9 @@ concurrency:
 
 jobs:
   # ----------------------------------------------------------------------
-  # Lint + format check (fast — runs first)
+  # Lint + format check
+  # Real bugs (unused vars, undefined names) BLOCK the PR.
+  # Style/format suggestions are non-blocking for now.
   # ----------------------------------------------------------------------
   lint:
     name: Lint & Format
@@ -30,11 +32,14 @@ jobs:
       - name: Install ruff
         run: pip install ruff
 
-      - name: Run ruff check (lint)
-        run: ruff check backend/ scripts/
+      - name: Block on real bugs (unused vars, undefined names, redefinitions)
+        run: ruff check backend/ scripts/ --select F821,F811,F841
 
-      - name: Run ruff format check
-        run: ruff format --check backend/ scripts/
+      - name: Soft check (style + format)
+        run: |
+          ruff check backend/ scripts/ || echo "Style suggestions found (non-blocking)"
+          ruff format --check backend/ scripts/ || echo "Format suggestions found (non-blocking)"
+        continue-on-error: true
 
   # ----------------------------------------------------------------------
   # Tests

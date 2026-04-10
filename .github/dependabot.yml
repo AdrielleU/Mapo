@@ -10,7 +10,7 @@ updates:
       interval: weekly
       day: monday
       time: "08:00"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     labels:
       - dependencies
       - python
@@ -21,6 +21,22 @@ updates:
     groups:
       python-minor-patch:
         update-types: ["minor", "patch"]
+    # Block major version bumps for fragile core libs — review manually
+    ignore:
+      - dependency-name: "websockets"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "fastapi"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pydantic"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "playwright"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "camoufox"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "patchright"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "httpx"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions versions
   - package-ecosystem: github-actions
@@ -33,6 +49,10 @@ updates:
       - github-actions
     commit-message:
       prefix: "ci"
+    # Group all action updates into one PR
+    groups:
+      github-actions:
+        patterns: ["*"]
 
   # Docker base image
   - package-ecosystem: docker
@@ -45,3 +65,7 @@ updates:
       - docker
     commit-message:
       prefix: "docker"
+    # Block major Python bumps (3.12 → 3.14 etc.) — review manually
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

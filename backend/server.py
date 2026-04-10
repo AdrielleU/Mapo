@@ -876,15 +876,6 @@ async def _run_pipeline_attempt(job_id: str, params: dict,
             _save_job(job_id)
             _fire_webhook(job_id, "task.failed", len(job.get("results", [])))
             # Fire error webhooks (per-job + global from settings)
-            error_payload = {
-                "job_id": job_id,
-                "query": params.get("query", ""),
-                "error": str(exc),
-                "attempt": attempt + 1,
-                "max_retries": max_retries,
-                "results_before_failure": len(job.get("results", [])),
-                "timestamp": time.time(),
-            }
             error_url = params.get("error_webhook_url", "")
             global_error_url = _load_ui_settings().get("webhooks", {}).get("error_url", "")
 

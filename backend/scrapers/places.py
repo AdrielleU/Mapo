@@ -253,7 +253,7 @@ def _extract_minimal_from_init_state(page_html, link):
     if raw.startswith(prefix):
         raw = raw[len(prefix) + 1:]
 
-    inner = _json.loads(raw)
+    inner = json.loads(raw)
     place = inner[0] if inner else None
     if not place or not isinstance(place, list):
         return None

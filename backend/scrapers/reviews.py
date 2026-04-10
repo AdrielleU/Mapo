@@ -67,8 +67,6 @@ class GoogleMapsAPIScraper:
 
     def _extract_feature_id(self, place_url):
         """Extract the feature ID (data parameter) from a Google Maps place URL."""
-        parsed = urllib.parse.urlparse(place_url)
-        path = parsed.path
         # Try to get from data parameter
         if "data=" in place_url:
             data_part = place_url.split("data=")[1].split("&")[0].split("?")[0]
@@ -80,7 +78,6 @@ class GoogleMapsAPIScraper:
 
     def _build_reviews_url(self, feature_id, token, sort_by, lang):
         """Build the internal Google Maps reviews API URL."""
-        sort_value = SORT_OPTIONS.get(sort_by, "newestFirst")
         base = "https://www.google.com/maps/rpc/listugcposts"
 
         # Build the protobuf-like parameter
