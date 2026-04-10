@@ -13,13 +13,10 @@ db.sqlite3
 .env
 .git/
 env/
-# Exclude top-level data/ (runtime jobs, exports, settings)
-# but RE-INCLUDE backend/data/ since those are Python modules (countries, states, categories)
-data
-!backend/data
-!backend/data/**
 *.db
 # Tests don't need to be in the image
 tests/
 .github/
 .pytest_cache/
+# Note: top-level data/ doesn't need to be in .dockerignore because the
+# Dockerfile uses explicit COPY commands instead of `COPY . .`

@@ -21,7 +21,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN python -m playwright install firefox chromium
 
-COPY . .
+# Copy only what's needed (avoids .dockerignore pattern issues with backend/data/)
+COPY backend/ ./backend/
+COPY frontend/ ./frontend/
+COPY scripts/ ./scripts/
+COPY mapo.yaml run.py ./
+
 RUN mkdir -p data
 RUN python scripts/generate_frontend_data.py
 
