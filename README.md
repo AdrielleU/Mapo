@@ -188,10 +188,10 @@ Open **http://localhost:8000**. That's it.
 ```bash
 docker run -d --name mapo -p 8000:8000 \
   -v $(pwd)/data:/app/data \
-  ghcr.io/adrielleu/mapo:v1.0.0
+  ghcr.io/adrielleu/mapo:v1.1.0
 ```
 
-Available tags: `latest`, `v1.0.0`, `1.0`, `1`, plus per-commit SHA tags. Browse them at the [GHCR package page](https://github.com/AdrielleU/Mapo/pkgs/container/mapo).
+Available tags: `latest`, `v1.1.0`, `1.1`, `1`, plus per-commit SHA tags. Browse them at the [GHCR package page](https://github.com/AdrielleU/Mapo/pkgs/container/mapo).
 
 **With env vars** (auth, AI, enrichment, etc.):
 
@@ -199,7 +199,7 @@ Available tags: `latest`, `v1.0.0`, `1.0`, `1`, plus per-commit SHA tags. Browse
 docker run -d --name mapo -p 8000:8000 \
   -v $(pwd)/data:/app/data \
   --env-file .env \
-  ghcr.io/adrielleu/mapo:v1.0.0
+  ghcr.io/adrielleu/mapo:v1.1.0
 ```
 
 **Upgrade later:**
@@ -303,7 +303,8 @@ Open **http://localhost:8000**.
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-python -m playwright install firefox
+python -m playwright install firefox chromium
+python -m camoufox fetch    # downloads stealth Firefox binary (~713 MB, one-time)
 python run.py
 ```
 
@@ -678,7 +679,7 @@ The `./data` volume holds:
 - `mapo_jobs.db` — job history (SQLite)
 - `settings.json` — UI-saved settings
 - `schedules.json` — cron schedules
-- `exports/` — auto-saved CSV/JSON of every scrape
+- `exports/` — auto-saved JSON of every scrape (CSV available on demand via API)
 
 Back this up to keep your jobs and schedules across rebuilds.
 
@@ -689,13 +690,13 @@ services:
   mapo-us:
     build: .
     ports: ["8001:8000"]
-    volumes: [./data/us:/app/data, ./mapo.yaml:/app/mapo.yaml:ro]
+    volumes: [./data/us:/app/data:z, ./mapo.yaml:/app/mapo.yaml:ro,z]
     env_file: [.env]
 
   mapo-eu:
     build: .
     ports: ["8002:8000"]
-    volumes: [./data/eu:/app/data, ./mapo.yaml:/app/mapo.yaml:ro]
+    volumes: [./data/eu:/app/data:z, ./mapo.yaml:/app/mapo.yaml:ro,z]
     env_file: [.env]
 ```
 
@@ -935,7 +936,7 @@ run.py                          # Entry point: CLI or web server
 │   └── generate_frontend_data.py  # Generates frontend/data.js
 ├── mapo.yaml                   # Configuration defaults
 ├── docker-compose.yaml         # Docker deployment
-└── Dockerfile                  # python:3.12-slim + Playwright Firefox + Chromium
+└── Dockerfile                  # python:3.12-slim + Playwright Firefox + Chromium + Camoufox
 ```
 
 ### Scraping Pipeline

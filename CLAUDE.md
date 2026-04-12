@@ -86,7 +86,7 @@ run.py                              # Entry point: CLI dispatch or FastAPI serve
 │       └── states.py               # US state → city mappings
 ├── mapo.yaml                       # Configuration file
 ├── .env.example                    # Environment variable template
-├── Dockerfile                      # python:3.12-slim + Playwright Firefox
+├── Dockerfile                      # python:3.12-slim + Playwright Firefox + Chromium + Camoufox
 └── docker-compose.yaml             # Single port 8000, volumes for data/ + config
 ```
 

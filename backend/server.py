@@ -1026,7 +1026,7 @@ async def shutdown():
 
 @app.get("/api/v1/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "ok", "version": "1.1.0"}
 
 
 @app.post("/api/v1/scrape")
