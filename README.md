@@ -966,6 +966,42 @@ run.py                          # Entry point: CLI or web server
 
 ---
 
+## Legal Disclaimer
+
+> **This section is for informational purposes only and does not constitute legal advice. If you have concerns about the legality of your use case, consult a qualified attorney.**
+
+### Terms of Service
+
+Scraping Google Maps violates [Google Maps Platform Terms of Service](https://cloud.google.com/maps-platform/terms), which prohibit exporting, extracting, or scraping Google Maps content for use outside the Services. By using Mapo, **you accept full responsibility** for ensuring your usage complies with all applicable terms of service, laws, and regulations in your jurisdiction.
+
+### What the law says
+
+U.S. courts have generally held that scraping *publicly available* data does not violate the Computer Fraud and Abuse Act (CFAA) — see *hiQ Labs v. LinkedIn* (9th Cir. 2022). However, this does **not** mean scraping is universally legal. Key risk factors include:
+
+- **Copyrighted content** — scraping user-written reviews or photos may raise copyright claims
+- **Personal data** — collecting names, emails, or phone numbers triggers GDPR (EU), CCPA (California), and other privacy laws
+- **Circumventing access controls** — bypassing CAPTCHAs, rate limits, or bot detection may strengthen legal claims against you
+- **Commercial use at scale** — selling or monetizing scraped data increases legal exposure
+
+### Your responsibility
+
+This software is provided as-is for **educational and research purposes**. The authors and contributors:
+
+- Do **not** encourage or endorse violating any website's terms of service
+- Are **not** responsible for how you use this tool or any consequences of that use
+- Make **no** warranties about the legality of scraping in your jurisdiction
+
+### Reducing your risk
+
+If you choose to use this tool, consider:
+
+- Respecting rate limits and using conservative scraping settings
+- Avoiding scraping personal data or copyrighted content (e.g., reviews)
+- Using the [Google Places API](https://developers.google.com/maps/documentation/places/web-service) for commercial or production use cases
+- Consulting a lawyer if you plan to use scraped data commercially
+
+---
+
 ## License
 
 [MIT](LICENSE)
