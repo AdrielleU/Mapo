@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN python -m playwright install firefox chromium
+RUN python -m camoufox fetch
 
 # Copy only what's needed (avoids .dockerignore pattern issues with backend/data/)
 COPY backend/ ./backend/

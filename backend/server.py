@@ -341,7 +341,7 @@ OUTPUT_FIELDS = [
     # Media
     "featured_image", "images", "image_count",
     # Timing / traffic
-    "popular_times", "most_popular_times",
+    "popular_times",
     # Detection
 ] + DETECTION_KEYS + [
     # Email intelligence
@@ -352,7 +352,7 @@ OUTPUT_FIELDS = [
     # Reviews data
     "featured_reviews", "detailed_reviews",
     # Meta
-    "cid", "data_id", "query",
+    "data_id", "query", "extraction_quality",
 ]
 
 
@@ -497,25 +497,16 @@ def _flatten_for_csv(row: dict) -> dict:
 
 
 def _auto_export(job_id: str, results: list[dict]):
-    """Auto-save results as CSV + JSON to data/exports/ on completion."""
+    """Auto-save results as JSON to data/exports/ on completion.
+
+    JSON is the canonical export format (lossless). CSV is available
+    on demand via GET /api/v1/jobs/{id}/download?format=csv.
+    """
     if not results:
         return
     export_dir = os.path.join("data", "exports")
     os.makedirs(export_dir, exist_ok=True)
 
-    # CSV
-    try:
-        csv_path = os.path.join(export_dir, f"mapo_{job_id}.csv")
-        fieldnames = list(results[0].keys())
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-            writer.writeheader()
-            for row in results:
-                writer.writerow(_flatten_for_csv(row))
-    except Exception as e:
-        print(f"[Mapo] Auto-export CSV failed: {e}")
-
-    # JSON
     try:
         json_path = os.path.join(export_dir, f"mapo_{job_id}.json")
         with open(json_path, "w", encoding="utf-8") as f:

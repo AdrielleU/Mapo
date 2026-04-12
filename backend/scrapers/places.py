@@ -216,6 +216,8 @@ async def scrape_place(link, cookies, user_agent, proxy=None):
                 if data is None and ";window.APP_INITIALIZATION_STATE=" in page_html:
                     try:
                         data = _extract_minimal_from_init_state(page_html, link)
+                        if data is not None:
+                            data["extraction_quality"] = "minimal"
                     except Exception:
                         data = None
 
@@ -309,9 +311,15 @@ async def _launch_camoufox(proxy_url):
     if proxy_url:
         kwargs["proxy"] = {"server": proxy_url}
 
-    # AsyncCamoufox returns a BrowserContext directly
+    # camoufox 135+ returns a Browser from __aenter__ (older versions returned
+    # a BrowserContext directly). Detect via hasattr and create a context when
+    # needed so cookies()/new_page() work regardless of camoufox version.
     ctx_manager = AsyncCamoufox(**kwargs)
-    context = await ctx_manager.__aenter__()
+    result = await ctx_manager.__aenter__()
+    if hasattr(result, "new_context"):
+        context = await result.new_context()
+    else:
+        context = result
     page = await context.new_page()
     # Store the context manager so we can __aexit__ it in cleanup
     return page, context, ctx_manager, None

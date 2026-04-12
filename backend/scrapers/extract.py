@@ -193,6 +193,43 @@ def _extract_featured_reviews(data):
     return reviews
 
 
+_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+
+def _process_popular_times(raw):
+    """Convert raw Google popular_times arrays into a clean dict.
+
+    Input is a nested array: [[day_index, [[hour, pct, label, ...], ...], ...], ...]
+    Output: {"Monday": {"7am": 25, "8am": 44, ...}, ...}
+    Only includes hours with non-zero busyness.
+    """
+    if not raw or not isinstance(raw, list):
+        return {}
+    result = {}
+    # raw can be nested one level deeper (raw[0] is the actual week array)
+    week = raw[0] if raw and isinstance(raw[0], list) and raw[0] and isinstance(raw[0][0], list) else raw
+    for day_block in week:
+        if not isinstance(day_block, list) or len(day_block) < 2:
+            continue
+        day_idx = day_block[0]
+        hours_data = day_block[1]
+        if not isinstance(day_idx, int) or not isinstance(hours_data, list):
+            continue
+        day_name = _DAY_NAMES[day_idx % 7] if isinstance(day_idx, int) else str(day_idx)
+        hours = {}
+        for entry in hours_data:
+            if not isinstance(entry, list) or len(entry) < 2:
+                continue
+            hour = entry[0]
+            pct = entry[1]
+            if isinstance(hour, int) and isinstance(pct, (int, float)) and pct > 0:
+                label = f"{hour % 12 or 12}{'am' if hour < 12 else 'pm'}"
+                hours[label] = pct
+        if hours:
+            result[day_name] = hours
+    return result
+
+
 def extract_data(input_str, link):
     """
     Main extraction function. Parses the APP_INITIALIZATION_STATE blob
@@ -272,9 +309,9 @@ def extract_data(input_str, link):
     reviews_with_response = sum(1 for r in featured_reviews if r.get("response_from_owner_text"))
     owner_response_rate = round(reviews_with_response / len(featured_reviews), 2) if featured_reviews else 0
 
-    # Popular times / busy hours
-    popular_times = safe_get(data, 6, 84) or []
-    most_popular_times = safe_get(data, 6, 84, 0) or []
+    # Popular times / busy hours — process raw Google arrays into clean format
+    raw_popular = safe_get(data, 6, 84) or []
+    popular_times = _process_popular_times(raw_popular)
 
     # Plus code
     plus_code = safe_get(data, 6, 183, 2, 0)
@@ -282,8 +319,7 @@ def extract_data(input_str, link):
     # Time zone
     time_zone = safe_get(data, 6, 30)
 
-    # CID (customer ID) and data_id
-    cid = safe_get(data, 6, 25)
+    # data_id (internal Google identifier, useful for dedup)
     data_id = safe_get(data, 6, 10)
 
     # Claiming status
@@ -349,7 +385,6 @@ def extract_data(input_str, link):
         "coordinates": coordinates,
         "plus_code": plus_code,
         "time_zone": time_zone,
-        "cid": cid,
         "data_id": data_id,
         "link": link,
         "reviews_link": reviews_link,
@@ -382,9 +417,10 @@ def extract_data(input_str, link):
         "image_count": image_count,
         # Timing / traffic
         "popular_times": popular_times,
-        "most_popular_times": most_popular_times,
         # Reviews
         "featured_reviews": featured_reviews,
+        # Extraction quality
+        "extraction_quality": "full",
     }
 
 
