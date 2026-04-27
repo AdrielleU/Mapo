@@ -1,9 +1,9 @@
 # Mapo — pinned dependencies
 
 # Web framework
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
-pydantic==2.10.6
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+pydantic==2.13.3
 websockets==14.2
 
 # Browser automation + anti-detection
@@ -15,14 +15,14 @@ playwright>=1.49.0
 httpx[http2]==0.28.1
 
 # Scraping + parsing
-lxml==6.0.2
+lxml==6.1.0
 regex==2026.4.4
 Unidecode==1.4.0
 dateutils==0.6.12
 
 # Config + utils
 PyYAML==6.0.3
-tenacity==9.1.2
+tenacity==9.1.4
 
 # CLI + output
 rich==14.3.3
@@ -30,18 +30,18 @@ openpyxl==3.1.5
 
 # Scheduling + storage
 APScheduler==3.11.2
-aiosqlite==0.21.0
+aiosqlite==0.22.1
 
 # Transitive deps — pinned
 anyio==4.13.0
-certifi==2026.2.25
+certifi==2026.4.22
 et_xmlfile==2.0.0
 h11==0.16.0
 h2==4.3.0
 hpack==4.1.0
 httpcore==1.0.9
 hyperframe==6.1.0
-idna==3.11
+idna==3.13
 markdown-it-py==4.0.0
 mdurl==0.1.2
 Pygments==2.20.0
