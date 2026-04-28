@@ -253,6 +253,46 @@ def _cmd_scrape(args: argparse.Namespace) -> None:
     _print_summary(results, "Scrape")
 
 
+def _cmd_scrape_jobs(args: argparse.Namespace) -> None:
+    """Execute the scrape_jobs subcommand (JobSpy-backed)."""
+    import asyncio as _aio
+    from backend.scrapers.jobs import scrape_jobs_async
+
+    sites = []
+    if args.sites:
+        sites = [s.strip() for s in args.sites.split(",") if s.strip()]
+
+    params = {
+        "search_term": args.search_term,
+        "location": args.location,
+        "sites": sites,
+        "results_wanted": args.results,
+        "hours_old": args.hours_old,
+        "distance": args.distance,
+        "job_type": args.job_type,
+        "is_remote": args.remote,
+        "country_indeed": args.country,
+        "linkedin_fetch_description": args.linkedin_descriptions,
+        "description_format": args.description_format,
+    }
+
+    print(
+        f"Scraping jobs: term={args.search_term!r} location={args.location!r} "
+        f"sites={sites or 'default'} results_wanted={args.results}"
+    )
+
+    results = _aio.run(scrape_jobs_async(params))
+
+    if not results:
+        print("No jobs found.")
+        return
+
+    fmt = _infer_format(args.output, getattr(args, "format", None))
+    _write_output(results, args.output, fmt)
+    print(f"Wrote {len(results)} job listings to {args.output}")
+    _print_summary(results, "Jobs")
+
+
 def _cmd_enrich(args: argparse.Namespace) -> None:
     """Execute the enrich subcommand."""
     from backend.enrichment import get_provider
@@ -288,6 +328,120 @@ def _cmd_enrich(args: argparse.Namespace) -> None:
     _write_output(enriched, args.output, fmt)
     print(f"Wrote {len(enriched)} enriched records to {args.output}")
     _print_summary(enriched, "Enrich")
+
+
+# ---------------------------------------------------------------------------
+# Worker mode (distributed)
+# ---------------------------------------------------------------------------
+
+def _cmd_worker(args: argparse.Namespace) -> None:
+    """Poll the configured store for pending jobs and run them.
+
+    Requires a backend that supports atomic claim — i.e. Postgres. SQLite
+    raises a clear error pointing at MAPO_DB_URL.
+
+    While processing, an asyncio task pings ``store.heartbeat`` every 30s
+    so the reaper can tell a live worker from a dead one. Between polls,
+    every ~30s of idle time, we also run the reaper to recover jobs whose
+    workers crashed.
+    """
+    import os
+    import socket
+    import asyncio as _asyncio
+    import time as _time
+
+    from backend.storage import get_store
+
+    store = get_store()
+    if not store.supports_distributed():
+        print(
+            "ERROR: worker mode requires a distributed-capable store.\n"
+            "Set MAPO_DB_URL=postgresql://user:pass@host/db and re-run."
+        )
+        sys.exit(2)
+
+    store.init()
+    worker_id = args.worker_id or f"{socket.gethostname()}-{os.getpid()}"
+    poll = max(0.5, float(args.poll_interval))
+    heartbeat_interval = max(5.0, float(getattr(args, "heartbeat_interval", 30.0)))
+    reap_interval = max(30.0, float(getattr(args, "reap_interval", 60.0)))
+    stale_after = max(heartbeat_interval * 4, float(getattr(args, "stale_after", 300.0)))
+
+    print(
+        f"[worker {worker_id}] polling every {poll}s | "
+        f"heartbeat every {heartbeat_interval}s | "
+        f"reap stale > {stale_after}s every {reap_interval}s"
+    )
+
+    # Import here so the web container doesn't pay this cost on import.
+    from backend.server import run_pipeline, _jobs, _save_job
+
+    async def _heartbeat_task(job_id: str, stop: _asyncio.Event):
+        try:
+            while not stop.is_set():
+                try:
+                    await _asyncio.wait_for(stop.wait(), timeout=heartbeat_interval)
+                    return  # stop set → exit
+                except _asyncio.TimeoutError:
+                    pass
+                try:
+                    await _asyncio.to_thread(store.heartbeat, job_id)
+                except Exception as exc:
+                    print(f"[worker {worker_id}] heartbeat failed for {job_id[:8]}: {exc}")
+        except _asyncio.CancelledError:
+            pass
+
+    last_reap = 0.0
+
+    async def _maybe_reap():
+        nonlocal last_reap
+        now = _time.monotonic()
+        if now - last_reap < reap_interval:
+            return
+        last_reap = now
+        try:
+            n = await _asyncio.to_thread(store.reap_stale_jobs, stale_after)
+            if n:
+                print(f"[worker {worker_id}] reaper requeued {n} stranded job(s)")
+        except Exception as exc:
+            print(f"[worker {worker_id}] reaper failed: {exc}")
+
+    async def _loop():
+        while True:
+            await _maybe_reap()
+
+            try:
+                claimed = store.claim_pending_job(worker_id)
+            except Exception as exc:
+                print(f"[worker {worker_id}] claim failed: {exc}")
+                await _asyncio.sleep(min(poll * 4, 30.0))
+                continue
+
+            if claimed is None:
+                await _asyncio.sleep(poll)
+                continue
+
+            job_id, job = claimed
+            print(f"[worker {worker_id}] picked up job {job_id[:8]} — query={job['params'].get('query', '')[:60]!r}")
+            _jobs[job_id] = job
+            stop = _asyncio.Event()
+            hb = _asyncio.create_task(_heartbeat_task(job_id, stop))
+            try:
+                await run_pipeline(job_id, job["params"])
+            except Exception as exc:
+                print(f"[worker {worker_id}] job {job_id[:8]} crashed: {exc}")
+            finally:
+                stop.set()
+                try:
+                    await _asyncio.wait_for(hb, timeout=heartbeat_interval + 5)
+                except (_asyncio.TimeoutError, _asyncio.CancelledError):
+                    hb.cancel()
+                _save_job(job_id)
+
+    try:
+        _asyncio.run(_loop())
+    except KeyboardInterrupt:
+        print(f"\n[worker {worker_id}] stopping.")
 
 
 # ---------------------------------------------------------------------------
@@ -360,12 +514,61 @@ def _build_parser() -> argparse.ArgumentParser:
                     choices=["minimal", "clay", "apollo", "hubspot", "instantly", "n8n", "leads", "geo", "full"],
                     help="Export preset (overrides --fields if both given)")
 
+    # --- scrape_jobs ---
+    sp_j = subparsers.add_parser(
+        "scrape_jobs",
+        help="Scrape job listings from LinkedIn / Indeed / Glassdoor / Google / ZipRecruiter",
+    )
+    sp_j.add_argument("--search-term", type=str, default="", help="Job title or keyword (e.g. 'software engineer')")
+    sp_j.add_argument("--location", type=str, default="", help="Location filter (e.g. 'San Francisco, CA')")
+    sp_j.add_argument(
+        "--sites", type=str, default="",
+        help="Comma-separated list (default: indeed,linkedin,google,zip_recruiter). "
+             "Options: indeed,linkedin,glassdoor,google,zip_recruiter,bayt,naukri",
+    )
+    sp_j.add_argument("--results", type=int, default=20, help="Listings per site (default: 20)")
+    sp_j.add_argument("--hours-old", type=int, default=None, help="Only postings newer than N hours (e.g. 168 = 7d)")
+    sp_j.add_argument("--distance", type=int, default=None, help="Miles from --location (default: 50 inside JobSpy)")
+    sp_j.add_argument(
+        "--job-type", type=str, default="",
+        choices=["", "fulltime", "parttime", "contract", "internship"],
+        help="Filter by employment type",
+    )
+    sp_j.add_argument("--remote", action="store_true", default=False, help="Remote-only postings")
+    sp_j.add_argument("--country", type=str, default="USA", help="Indeed/Glassdoor regional code (default: USA)")
+    sp_j.add_argument(
+        "--linkedin-descriptions", action="store_true", default=False,
+        help="Follow each LinkedIn URL for full description (slow)",
+    )
+    sp_j.add_argument(
+        "--description-format", type=str, default="markdown", choices=["markdown", "html"],
+        help="Format of job description (default: markdown)",
+    )
+    sp_j.add_argument("--output", "-o", type=str, required=True, help="Output file path (.csv, .json, .xlsx)")
+    sp_j.add_argument("--format", type=str, choices=["csv", "json", "xlsx"], default=None)
+
     # --- enrich ---
     sp_e = subparsers.add_parser("enrich", help="Enrich places with contact data")
     sp_e.add_argument("--input", "-i", type=str, required=True, help="Input CSV or JSON file")
     sp_e.add_argument("--provider", type=str, default=None, help="Enrichment provider (default from config)")
     sp_e.add_argument("--output", "-o", type=str, required=True, help="Output file path")
     sp_e.add_argument("--format", type=str, choices=["csv", "json", "xlsx"], default=None)
+
+    # --- worker ---
+    sp_w = subparsers.add_parser(
+        "worker",
+        help="Run as a distributed worker (requires MAPO_DB_URL=postgresql://...)",
+    )
+    sp_w.add_argument("--poll-interval", type=float, default=2.0,
+                      help="Seconds to sleep between polls when queue is empty (default: 2)")
+    sp_w.add_argument("--worker-id", type=str, default=None,
+                      help="Identifier recorded with claimed jobs (default: hostname-pid)")
+    sp_w.add_argument("--heartbeat-interval", type=float, default=30.0,
+                      help="Seconds between heartbeat pings while running a job (default: 30)")
+    sp_w.add_argument("--reap-interval", type=float, default=60.0,
+                      help="Min seconds between reaper sweeps for dead-worker jobs (default: 60)")
+    sp_w.add_argument("--stale-after", type=float, default=300.0,
+                      help="Seconds with no heartbeat before a job is considered dead (default: 300)")
 
     return parser
 
@@ -386,11 +589,15 @@ def main() -> None:
     try:
         if args.command == "scrape":
             _cmd_scrape(args)
+        elif args.command == "scrape_jobs":
+            _cmd_scrape_jobs(args)
         elif args.command == "enrich":
             if args.provider is None:
                 from backend.config import config
                 args.provider = config.enrichment.provider
             _cmd_enrich(args)
+        elif args.command == "worker":
+            _cmd_worker(args)
     except KeyboardInterrupt:
         print("\nInterrupted.")
         sys.exit(130)

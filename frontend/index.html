@@ -28,30 +28,169 @@
   <!-- TABS: Input / Output                                         -->
   <!-- ============================================================ -->
   <div class="tab-bar">
-    <button class="active" onclick="switchTab('input')">Input</button>
-    <button onclick="switchTab('output')">Output</button>
+    <button class="active" onclick="switchTab('input')">Run</button>
     <button onclick="switchTab('schedules')">Schedules</button>
     <button onclick="switchTab('settings')">Settings</button>
   </div>
 
   <!-- ============================================================ -->
-  <!-- INPUT TAB                                                    -->
+  <!-- RUN VIEW (was Input + Output combined into a two-pane grid)  -->
   <!-- ============================================================ -->
   <div id="tab-input" class="tab-content active">
-    <form id="search-form" onsubmit="submitSearch(event)">
+    <div class="run-grid">
+      <div class="run-pane-left">
+    <form id="search-form" class="find-places" onsubmit="submitSearch(event)">
 
-      <!-- Search Queries -->
-      <div class="card">
-        <h2>Search Queries</h2>
-        <div class="query-list" id="query-list" role="list" aria-label="Search queries">
-          <div class="query-row" role="listitem">
-            <input type="text" placeholder='e.g. "Web Developers in Bangalore"' value="" aria-label="Search query">
-            <button type="button" class="remove-btn" onclick="removeQuery(this)" aria-label="Remove query">&times;</button>
+      <!-- =================================================== -->
+      <!-- HERO: query + max results + run, all in one place   -->
+      <!-- =================================================== -->
+      <div class="card hero-card">
+        <div class="view-toggle" role="tablist" aria-label="Find mode" style="margin-right:0.5rem">
+          <button type="button" class="vt-btn active" id="fm-places" role="tab" aria-selected="true"
+                  onclick="setFindMode('places')">Businesses</button>
+          <button type="button" class="vt-btn" id="fm-jobs" role="tab" aria-selected="false"
+                  onclick="setFindMode('jobs')">Jobs</button>
+        </div>
+        <div class="view-toggle" role="tablist" aria-label="Input mode">
+          <button type="button" class="vt-btn active" id="vt-form" role="tab" aria-selected="true"
+                  onclick="setInputMode('form')">Form</button>
+          <button type="button" class="vt-btn" id="vt-json" role="tab" aria-selected="false"
+                  onclick="setInputMode('json')">JSON</button>
+        </div>
+        <div class="hero-row" id="hero-form-view">
+          <textarea id="hero-query" rows="3"
+                    placeholder='What do you want to scrape?&#10;e.g. "Web Developers in Bangalore" — one query per line, or paste Google Maps URLs'
+                    aria-label="Search queries"></textarea>
+        </div>
+        <div class="hero-row hidden" id="hero-json-view">
+          <textarea id="json-payload" rows="14" spellcheck="false"
+                    placeholder='{"query": "coffee shops in NYC", "max_results": 100, ...}'
+                    aria-label="JSON payload"></textarea>
+          <p class="help-text">
+            Paste a complete <code>POST /api/v1/scrape</code> body. Run will submit it as-is.
+            Switching back to Form discards JSON edits.
+          </p>
+        </div>
+        <div class="hero-controls">
+          <div class="hero-input-mini json-mode-hide">
+            <label for="max-results">Max Results</label>
+            <input type="number" id="max-results" value="100" min="1" max="5000">
+          </div>
+          <div class="hero-input-mini json-mode-hide places-only">
+            <label for="hero-strategy">Strategy</label>
+            <select id="hero-strategy" onchange="document.getElementById('strategy').value = this.value">
+              <option value="">Default</option>
+              <option value="fastest">Fastest (~21)</option>
+              <option value="fast">Fast (~60)</option>
+              <option value="detailed">Detailed (250 + reviews)</option>
+              <option value="zoom">Zoom (~120)</option>
+            </select>
+          </div>
+          <div class="hero-actions">
+            <button type="submit" class="btn btn-primary btn-lg">Run</button>
+            <button type="button" class="btn-link json-mode-hide places-only" onclick="toggleAdvanced()" id="adv-toggle-btn">More options ▾</button>
           </div>
         </div>
-        <button type="button" class="add-field-btn mt-1" onclick="addQuery()">+ Add Query</button>
-        <p class="help-text mt-1">Enter search queries or Google Maps URLs, one per row.</p>
+        <p class="help-text json-mode-hide places-only" id="hero-helper" style="margin-top:0.5rem">
+          Or pick country + business type below. Empty queries are ignored.
+        </p>
+        <p class="help-text json-mode-hide jobs-only" id="hero-helper-jobs" style="margin-top:0.5rem">
+          Type a job title above (e.g. "software engineer"). Set the location and sites in Jobs filters below.
+        </p>
       </div>
+
+      <!-- =================================================== -->
+      <!-- JOBS MODE: location-based job-listings scrape       -->
+      <!-- (LinkedIn / Indeed / Glassdoor / Google / ZipRec.)  -->
+      <!-- =================================================== -->
+      <div class="card jobs-only json-mode-hide">
+        <h3 style="margin-top:0">Jobs filters</h3>
+        <div class="form-row">
+          <div>
+            <label for="jobs-location">Location</label>
+            <input type="text" id="jobs-location" placeholder="e.g. San Francisco, CA"
+                   autocomplete="off">
+            <p class="help-text">City + state, ZIP, or "Remote".</p>
+          </div>
+          <div>
+            <label for="jobs-distance">Distance (miles)</label>
+            <input type="number" id="jobs-distance" min="0" max="200" placeholder="50">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <label>Job sites</label>
+            <div style="display:flex; flex-wrap:wrap; gap:0.6rem; padding:0.3rem 0">
+              <label class="seg"><input type="checkbox" class="js-site" value="indeed" checked> Indeed</label>
+              <label class="seg"><input type="checkbox" class="js-site" value="linkedin" checked> LinkedIn</label>
+              <label class="seg"><input type="checkbox" class="js-site" value="glassdoor"> Glassdoor</label>
+              <label class="seg"><input type="checkbox" class="js-site" value="google" checked> Google</label>
+              <label class="seg"><input type="checkbox" class="js-site" value="zip_recruiter" checked> ZipRecruiter</label>
+              <label class="seg"><input type="checkbox" class="js-site" value="bayt"> Bayt</label>
+              <label class="seg"><input type="checkbox" class="js-site" value="naukri"> Naukri</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <label for="jobs-type">Job type</label>
+            <select id="jobs-type">
+              <option value="">Any</option>
+              <option value="fulltime">Full-time</option>
+              <option value="parttime">Part-time</option>
+              <option value="contract">Contract</option>
+              <option value="internship">Internship</option>
+            </select>
+          </div>
+          <div>
+            <label for="jobs-hours">Posted within (hours)</label>
+            <input type="number" id="jobs-hours" min="1" max="8760" placeholder="168 = last 7 days">
+          </div>
+          <div>
+            <label for="jobs-country">Indeed/Glassdoor country</label>
+            <select id="jobs-country">
+              <option value="USA" selected>USA</option>
+              <option value="UK">UK</option>
+              <option value="Canada">Canada</option>
+              <option value="Australia">Australia</option>
+              <option value="Germany">Germany</option>
+              <option value="France">France</option>
+              <option value="Netherlands">Netherlands</option>
+              <option value="Spain">Spain</option>
+              <option value="Italy">Italy</option>
+              <option value="India">India</option>
+              <option value="Singapore">Singapore</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <label class="toggle-row">
+              <span>Remote only</span>
+              <label class="toggle" for="jobs-remote"><input type="checkbox" id="jobs-remote" aria-label="Remote only"><span class="slider"></span></label>
+            </label>
+          </div>
+          <div>
+            <label class="toggle-row">
+              <span>Fetch full LinkedIn descriptions <small>(slow)</small></span>
+              <label class="toggle" for="jobs-linkedin-desc"><input type="checkbox" id="jobs-linkedin-desc" aria-label="Fetch LinkedIn descriptions"><span class="slider"></span></label>
+            </label>
+          </div>
+        </div>
+
+        <p class="help-text">
+          Search term goes in the box at the top (e.g. "software engineer").
+          Use the Max Results field to set how many listings to fetch per site.
+        </p>
+      </div>
+
+      <!-- =================================================== -->
+      <!-- ADVANCED OPTIONS: existing accordions, collapsed    -->
+      <!-- =================================================== -->
+      <div id="advanced-options" class="advanced-collapsed json-mode-hide places-only">
 
       <!-- Section: Extract Cities By Country -->
       <div class="card">
@@ -159,10 +298,10 @@
         </div>
       </div>
 
-      <!-- Section: Language and Max Results -->
+      <!-- Section: Language (Max Results is now in the hero) -->
       <div class="card">
         <div class="accordion-header" onclick="toggleAccordion(this)">
-          <span class="chevron">&#9654;</span> Language and Max Results
+          <span class="chevron">&#9654;</span> Language
         </div>
         <div class="accordion-body" id="sec-lang">
           <div class="form-row">
@@ -191,11 +330,6 @@
                 <option value="id">Indonesian</option>
               </select>
             </div>
-            <div>
-              <label for="max-results">Max Results per Query</label>
-              <input type="number" id="max-results" value="100" min="1" max="5000" placeholder="Leave empty for all">
-              <p class="help-text">Leave empty to extract all places.</p>
-            </div>
           </div>
         </div>
       </div>
@@ -219,6 +353,36 @@
             <div>
               <label for="zoom-level">Zoom Level (1-21)</label>
               <input type="number" id="zoom-level" value="14" min="1" max="21" placeholder="14">
+            </div>
+          </div>
+          <div class="form-row">
+            <div>
+              <label for="strategy">Search Strategy</label>
+              <select id="strategy">
+                <option value="">Default</option>
+                <option value="fastest">Fastest (~21 results)</option>
+                <option value="fast">Fast (~60 results)</option>
+                <option value="detailed">Detailed (250 + reviews)</option>
+                <option value="zoom">By Zoom (zoom 16, ~120)</option>
+              </select>
+              <p class="help-text">Preset for the speed-vs-coverage tradeoff. Manual values above still win.</p>
+            </div>
+            <div>
+              <label for="grid-bbox">Grid Bounding Box</label>
+              <input type="text" id="grid-bbox" placeholder="min_lat, min_lon, max_lat, max_lon">
+              <p class="help-text">Tile a region into cells for exhaustive coverage. e.g. 40.70, -74.02, 40.80, -73.92</p>
+            </div>
+            <div>
+              <label for="grid-cell-km">Grid Cell Size (km)</label>
+              <input type="number" id="grid-cell-km" value="5" min="0.5" max="100" step="0.5">
+              <p class="help-text">Smaller = more cells = more thorough but slower.</p>
+            </div>
+          </div>
+          <div class="form-row">
+            <div style="flex: 1;">
+              <label for="geo-polygon">GeoJSON Polygon (advanced)</label>
+              <textarea id="geo-polygon" rows="2" placeholder='[[40.70,-74.02],[40.80,-74.02],[40.75,-73.92]]'></textarea>
+              <p class="help-text">List of [lat, lon] pairs. Cells outside the polygon are dropped.</p>
             </div>
           </div>
         </div>
@@ -360,36 +524,42 @@
         </div>
       </div>
 
-      <!-- Submit -->
-      <div class="btn-bar">
+      </div>
+      <!-- /advanced-options -->
+
+      <!-- Submit (also at bottom for users who scroll) -->
+      <div class="btn-bar json-mode-hide">
         <button type="submit" class="btn btn-primary">Run</button>
         <button type="button" class="btn-reset" onclick="resetForm()">Reset to Default</button>
       </div>
     </form>
-  </div>
-
-  <!-- ============================================================ -->
-  <!-- OUTPUT TAB                                                   -->
-  <!-- ============================================================ -->
-  <div id="tab-output" class="tab-content">
-
-    <!-- Jobs List -->
-    <div class="card">
-      <h2>Tasks</h2>
-      <div id="jobs-list"><span class="text-dim text-sm">No tasks yet.</span></div>
-    </div>
-
-    <!-- Progress Card -->
-    <div class="card hidden" id="progress-card">
-      <h2>Progress &mdash; <span id="progress-job-id"></span></h2>
-      <div class="progress-wrap">
-        <div class="progress-bar active" id="progress-bar" style="width:0%"></div>
-        <div class="progress-text" id="progress-text">0%</div>
       </div>
-      <div class="text-sm text-dim" id="progress-detail"></div>
-    </div>
+      <!-- /run-pane-left -->
 
-    <!-- Results Card -->
+      <!-- =================================================== -->
+      <!-- RIGHT PANE: persistent jobs + live progress         -->
+      <!-- =================================================== -->
+      <aside class="run-pane-right">
+        <div class="card">
+          <h2>Tasks</h2>
+          <div id="jobs-list"><span class="text-dim text-sm">No tasks yet.</span></div>
+        </div>
+
+        <div class="card hidden" id="progress-card">
+          <h2>Progress &mdash; <span id="progress-job-id"></span></h2>
+          <div class="progress-wrap">
+            <div class="progress-bar active" id="progress-bar" style="width:0%"></div>
+            <div class="progress-text" id="progress-text">0%</div>
+          </div>
+          <div class="text-sm text-dim" id="progress-detail"></div>
+        </div>
+      </aside>
+    </div>
+    <!-- /run-grid -->
+
+    <!-- =================================================== -->
+    <!-- RESULTS: full width below the grid (table needs space) -->
+    <!-- =================================================== -->
     <div class="card hidden" id="results-card">
       <div class="flex-between">
         <h2>Results &mdash; <span id="results-job-id"></span></h2>
@@ -835,6 +1005,20 @@ function toggleAccordion(header) {
   body.classList.toggle('open');
 }
 
+function toggleAdvanced() {
+  const adv = document.getElementById('advanced-options');
+  if (!adv) return;
+  const isOpen = !adv.classList.contains('advanced-collapsed');
+  if (isOpen) {
+    adv.classList.add('advanced-collapsed');
+    document.getElementById('adv-toggle-btn').textContent = 'More options ▾';
+  } else {
+    adv.classList.remove('advanced-collapsed');
+    document.getElementById('adv-toggle-btn').textContent = 'Less options ▴';
+    adv.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  }
+}
+
 /* ================================================================
    QUERY ROWS
    ================================================================ */
@@ -1061,19 +1245,86 @@ function setReviewSort(btn) {
 }
 
 /* ================================================================
+   FIND-MODE TOGGLE (Businesses ↔ Jobs)
+   ================================================================ */
+let _findMode = 'places';
+
+function setFindMode(mode) {
+  if (mode === _findMode) return;
+  const form = document.getElementById('search-form');
+  const heroQuery = document.getElementById('hero-query');
+  if (mode === 'jobs') {
+    form.classList.remove('find-places');
+    form.classList.add('find-jobs');
+    document.getElementById('fm-jobs').classList.add('active');
+    document.getElementById('fm-jobs').setAttribute('aria-selected', 'true');
+    document.getElementById('fm-places').classList.remove('active');
+    document.getElementById('fm-places').setAttribute('aria-selected', 'false');
+    if (heroQuery) heroQuery.placeholder =
+      'What job? e.g. "software engineer" — one search term per line';
+  } else {
+    form.classList.remove('find-jobs');
+    form.classList.add('find-places');
+    document.getElementById('fm-places').classList.add('active');
+    document.getElementById('fm-places').setAttribute('aria-selected', 'true');
+    document.getElementById('fm-jobs').classList.remove('active');
+    document.getElementById('fm-jobs').setAttribute('aria-selected', 'false');
+    if (heroQuery) heroQuery.placeholder =
+      'What do you want to scrape?\ne.g. "Web Developers in Bangalore" — one query per line, or paste Google Maps URLs';
+  }
+  _findMode = mode;
+}
+
+/* ================================================================
+   INPUT-MODE TOGGLE (Form ↔ JSON)
+   ================================================================ */
+let _inputMode = 'form';
+
+function setInputMode(mode) {
+  if (mode === _inputMode) return;
+  const form = document.getElementById('search-form');
+  if (mode === 'json') {
+    // Snapshot the current form into the JSON textarea so users can edit.
+    const snapshot = (_findMode === 'jobs')
+      ? (_buildJobsBodyFromForm({skipValidation: true}) || {search_term: ''})
+      : (_buildScrapeBodyFromForm({skipValidation: true}) || {query: ''});
+    document.getElementById('json-payload').value = JSON.stringify(snapshot, null, 2);
+    document.getElementById('hero-form-view').classList.add('hidden');
+    document.getElementById('hero-json-view').classList.remove('hidden');
+    form.classList.add('mode-json');
+    document.getElementById('vt-json').classList.add('active');
+    document.getElementById('vt-json').setAttribute('aria-selected', 'true');
+    document.getElementById('vt-form').classList.remove('active');
+    document.getElementById('vt-form').setAttribute('aria-selected', 'false');
+  } else {
+    document.getElementById('hero-form-view').classList.remove('hidden');
+    document.getElementById('hero-json-view').classList.add('hidden');
+    form.classList.remove('mode-json');
+    document.getElementById('vt-form').classList.add('active');
+    document.getElementById('vt-form').setAttribute('aria-selected', 'true');
+    document.getElementById('vt-json').classList.remove('active');
+    document.getElementById('vt-json').setAttribute('aria-selected', 'false');
+  }
+  _inputMode = mode;
+}
+
+/* ================================================================
    FORM SUBMIT
    ================================================================ */
-async function submitSearch(e) {
-  e.preventDefault();
-
+function _buildScrapeBodyFromForm({skipValidation = false} = {}) {
   const country = document.getElementById('country').value;
-  const queries = [...document.querySelectorAll('#query-list input')].map(i => i.value.trim()).filter(Boolean);
+  const heroEl = document.getElementById('hero-query');
+  const heroVal = heroEl ? heroEl.value : '';
+  const heroQueries = heroVal.split('\n').map(s => s.trim()).filter(Boolean);
+  const legacyQueries = [...document.querySelectorAll('#query-list input')].map(i => i.value.trim()).filter(Boolean);
+  const queries = heroQueries.length ? heroQueries : legacyQueries;
 
-  if (!country && queries.length === 0) {
-    return alert('Enter at least one search query or select a country.');
+  if (!skipValidation && !country && queries.length === 0) {
+    alert('Enter at least one search query or select a country.');
+    return null;
   }
 
-  const body = {
+  return {
     query: queries.join('\n'),
     country: country,
     state: document.getElementById('state').value || '',
@@ -1085,6 +1336,22 @@ async function submitSearch(e) {
     coordinates: document.getElementById('coordinates').value.trim(),
     zoom_level: parseFloat(document.getElementById('zoom-level').value) || 14,
     radius_meters: parseInt(document.getElementById('radius-meters').value) || null,
+    strategy: document.getElementById('strategy')?.value || '',
+    grid_bbox: (() => {
+      const v = (document.getElementById('grid-bbox')?.value || '').trim();
+      if (!v) return null;
+      const parts = v.split(/[,\s]+/).map(parseFloat).filter(n => !isNaN(n));
+      return parts.length === 4 ? parts : null;
+    })(),
+    grid_cell_km: parseFloat(document.getElementById('grid-cell-km')?.value) || 5.0,
+    geo_polygon: (() => {
+      const v = (document.getElementById('geo-polygon')?.value || '').trim();
+      if (!v) return null;
+      try {
+        const parsed = JSON.parse(v);
+        return Array.isArray(parsed) && parsed.length >= 3 ? parsed : null;
+      } catch { return null; }
+    })(),
     enable_reviews: document.getElementById('enable-reviews').checked,
     max_reviews: parseInt(document.getElementById('max-reviews').value) || 20,
     reviews_sort: reviewSort,
@@ -1113,39 +1380,107 @@ async function submitSearch(e) {
       return v ? v.split(',').map(f => f.trim()).filter(Boolean) : [];
     })(),
   };
+}
 
-  // Read uploaded CSV file (if any) and base64-encode it
-  const dedupFile = document.getElementById('dedup-csv').files[0];
-  if (dedupFile) {
-    try {
-      const text = await dedupFile.text();
-      body.skip_existing_csv_data = btoa(unescape(encodeURIComponent(text)));
-    } catch (err) {
-      return alert('Failed to read existing leads file: ' + err.message);
+function _buildJobsBodyFromForm({skipValidation = false} = {}) {
+  const heroEl = document.getElementById('hero-query');
+  const heroVal = heroEl ? heroEl.value : '';
+  const searchTerm = heroVal.split('\n').map(s => s.trim()).filter(Boolean).join(' ');
+  const location = document.getElementById('jobs-location')?.value.trim() || '';
+
+  if (!skipValidation && !searchTerm && !location) {
+    alert('Enter a job search term or a location.');
+    return null;
+  }
+
+  const sites = [...document.querySelectorAll('.js-site:checked')].map(el => el.value);
+
+  return {
+    search_term: searchTerm,
+    location: location,
+    sites: sites,
+    results_wanted: parseInt(document.getElementById('max-results').value) || 20,
+    hours_old: parseInt(document.getElementById('jobs-hours')?.value) || null,
+    distance: parseInt(document.getElementById('jobs-distance')?.value) || null,
+    job_type: document.getElementById('jobs-type')?.value || '',
+    is_remote: document.getElementById('jobs-remote')?.checked || false,
+    country_indeed: document.getElementById('jobs-country')?.value || 'USA',
+    linkedin_fetch_description: document.getElementById('jobs-linkedin-desc')?.checked || false,
+    description_format: 'markdown',
+    webhook_url: document.getElementById('webhook-url')?.value.trim() || '',
+    error_webhook_url: document.getElementById('error-webhook-url')?.value.trim() || '',
+    webhook_headers: (() => {
+      const k = document.getElementById('webhook-header-key')?.value.trim();
+      const v = document.getElementById('webhook-header-val')?.value.trim();
+      return k && v ? {[k]: v} : {};
+    })(),
+  };
+}
+
+async function submitSearch(e) {
+  e.preventDefault();
+
+  // Pick endpoint by find mode
+  const isJobsMode = _findMode === 'jobs';
+  const endpoint = isJobsMode ? '/api/v1/scrape_jobs' : '/api/v1/scrape';
+
+  let body;
+  if (_inputMode === 'json') {
+    const raw = (document.getElementById('json-payload').value || '').trim();
+    if (!raw) return alert('JSON payload is empty.');
+    try { body = JSON.parse(raw); }
+    catch (err) { return alert('Invalid JSON: ' + err.message); }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return alert('JSON payload must be an object.');
     }
-  }
+    // Size warning only meaningful for places mode; jobs mode is bounded by results_wanted per site.
+    if (!isJobsMode) {
+      const estimated = (parseInt(body.max_results) || 0) * (parseInt(body.max_cities) || 1);
+      if (estimated > 1000) {
+        if (!confirm(`This job will scrape up to ${estimated.toLocaleString()} places. Continue?`)) return;
+      }
+    }
+  } else if (isJobsMode) {
+    body = _buildJobsBodyFromForm();
+    if (!body) return;
+  } else {
+    body = _buildScrapeBodyFromForm();
+    if (!body) return;  // validation failed; alert already shown
 
-  if (country && !body.business_type) {
-    return alert('Enter a business type when using country extraction.');
-  }
+    // Read uploaded CSV file (if any) and base64-encode it
+    const dedupFile = document.getElementById('dedup-csv').files[0];
+    if (dedupFile) {
+      try {
+        const text = await dedupFile.text();
+        body.skip_existing_csv_data = btoa(unescape(encodeURIComponent(text)));
+      } catch (err) {
+        return alert('Failed to read existing leads file: ' + err.message);
+      }
+    }
 
-  // Warn if estimated total exceeds threshold
-  const estimated = body.max_results * (body.max_cities || 1);
-  if (estimated > 1000) {
-    if (!confirm(`This job will scrape up to ${estimated.toLocaleString()} places. Continue?`)) {
-      return;
+    if (body.country && !body.business_type) {
+      return alert('Enter a business type when using country extraction.');
+    }
+
+    // Warn if estimated total exceeds threshold
+    const estimated = body.max_results * (body.max_cities || 1);
+    if (estimated > 1000) {
+      if (!confirm(`This job will scrape up to ${estimated.toLocaleString()} places. Continue?`)) {
+        return;
+      }
     }
   }
 
   try {
-    const r = await fetch('/api/v1/scrape', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const r = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) {
       return alert(data.detail || `Request failed: ${r.status}`);
     }
     if (data.job_id) {
-      switchTab('output');
       connectSSE(data.job_id);
+      // Right pane is always visible — just scroll the progress card into view.
+      setTimeout(() => document.getElementById('progress-card')?.scrollIntoView({behavior: 'smooth', block: 'nearest'}), 50);
     }
   } catch(err) { alert('Request failed: ' + err.message); }
 }
@@ -1586,8 +1921,7 @@ async function runScheduleNow(id) {
   const r = await fetch(`/api/v1/schedules/${id}/run`, {method: 'POST'});
   const data = await r.json();
   if (data.job_id) {
-    alert(`Job started: ${data.job_id.slice(0, 8)}. Check the Output tab.`);
-    switchTab('output');
+    switchTab('input');  // Run view (the right pane shows progress)
     connectSSE(data.job_id);
   }
 }

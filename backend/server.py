@@ -11,7 +11,6 @@ import json
 import os
 import random
 import re
-import sqlite3
 import time
 import uuid
 import urllib.parse
@@ -90,85 +89,59 @@ app.add_api_route("/auth/check", check_auth_api, methods=["GET"])
 
 _jobs: dict = {}
 _ws_clients: dict[str, list[WebSocket]] = {}
-_DB_PATH = os.path.join(".", "data", "mapo_jobs.db")
+
+# Pluggable storage — SQLite by default, Postgres when MAPO_DB_URL is set.
+# See backend/storage/__init__.py for selection logic.
+from backend.storage import get_store as _get_store
+_store = _get_store()
 
 
-def _db_connect():
-    """Open a SQLite connection with WAL mode for better concurrency."""
-    conn = sqlite3.connect(_DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+# Mode controls whether this process processes jobs locally or only enqueues them:
+#   standalone (default): web container also runs jobs in-process (current behavior)
+#   web              : web container ONLY enqueues jobs; workers in other containers
+#                       process them via `python run.py worker`. Requires Postgres.
+MAPO_MODE = (os.environ.get("MAPO_MODE", "standalone") or "standalone").strip().lower()
+if MAPO_MODE not in ("standalone", "web"):
+    raise ValueError(f"MAPO_MODE must be 'standalone' or 'web', got {MAPO_MODE!r}")
+if MAPO_MODE == "web" and not _store.supports_distributed():
+    raise ValueError(
+        "MAPO_MODE=web requires a distributed-capable store. "
+        "Set MAPO_DB_URL=postgresql://... or run in standalone mode."
+    )
+
+
+def _enqueue_or_run(job_id: str, params: dict) -> "asyncio.Task | None":
+    """Either kick off the right pipeline locally (standalone) or just persist
+    the job as `pending` for a worker to claim (web mode). Returns the local
+    task or None. Dispatches by ``params["mode"]``: "places" (default) or "jobs".
+    """
+    if MAPO_MODE == "web":
+        # Worker(s) will claim it via store.claim_pending_job()
+        _jobs[job_id]["status"] = "pending"
+        _save_job(job_id)
+        return None
+    mode = (params.get("mode") or "places").lower()
+    if mode == "jobs":
+        return asyncio.create_task(run_jobs_pipeline(job_id, params))
+    return asyncio.create_task(run_pipeline(job_id, params))
 
 
 def _init_db():
     """Create the jobs table if it does not exist."""
-    os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
-    conn = _db_connect()
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS jobs (
-            job_id TEXT PRIMARY KEY,
-            status TEXT,
-            params TEXT,
-            results TEXT,
-            error TEXT,
-            created_at REAL,
-            updated_at REAL
-        )
-        """
-    )
-    conn.commit()
-    conn.close()
+    _store.init()
 
 
 def _save_job(job_id: str):
-    """Persist a single job to SQLite."""
+    """Persist a single job to the configured store."""
     job = _jobs.get(job_id)
     if job is None:
         return
-    conn = _db_connect()
-    conn.execute(
-        """
-        INSERT OR REPLACE INTO jobs (job_id, status, params, results, error, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            job_id,
-            job.get("status"),
-            json.dumps(job.get("params", {})),
-            json.dumps(job.get("results", [])),
-            job.get("error"),
-            job.get("created_at"),
-            job.get("updated_at"),
-        ),
-    )
-    conn.commit()
-    conn.close()
+    _store.save_job(job_id, job)
 
 
 def _load_jobs():
-    """Load all persisted jobs from SQLite into _jobs."""
-    if not os.path.exists(_DB_PATH):
-        return
-    conn = _db_connect()
-    cursor = conn.execute("SELECT job_id, status, params, results, error, created_at, updated_at FROM jobs")
-    for row in cursor.fetchall():
-        job_id, status, params, results, error, created_at, updated_at = row
-        # Do not reload running jobs — they are stale after restart
-        if status == "running":
-            status = "failed"
-            error = error or "Server restarted while job was running."
-        _jobs[job_id] = {
-            "job_id": job_id,
-            "status": status,
-            "params": json.loads(params) if params else {},
-            "results": json.loads(results) if results else [],
-            "error": error,
-            "created_at": created_at,
-            "updated_at": updated_at,
-            "progress": None,
-        }
-    conn.close()
+    """Load all persisted jobs into the in-memory ``_jobs`` map."""
+    _jobs.update(_store.load_jobs())
 
 
 # ---------------------------------------------------------------------------
@@ -208,8 +181,88 @@ def _split_gmaps_links(links):
     return place_links, search_queries
 
 
+def _apply_strategy(data: dict) -> dict:
+    """Map the user-facing strategy preset onto the underlying knobs.
+
+    Inspired by omkarcloud's Fast/Fastest/Detailed/Zoom dropdowns. We never
+    overwrite values the user already set explicitly.
+    """
+    strategy = (data.get("strategy") or "").lower().strip()
+    if not strategy:
+        return data
+    presets = {
+        # name: (max_results, zoom, scroll bias, enable_reviews override)
+        "fastest": {"max_results": 21, "zoom_level": 14},
+        "fast":    {"max_results": 60, "zoom_level": 14},
+        "detailed":{"max_results": 250, "zoom_level": 15, "enable_reviews": True},
+        "zoom":    {"max_results": 120, "zoom_level": 16},
+    }
+    preset = presets.get(strategy)
+    if not preset:
+        return data
+    out = dict(data)
+    for k, v in preset.items():
+        # Only set if the user left it at the default
+        if k == "max_results" and out.get("max_results", 100) == 100:
+            out[k] = v
+        elif k == "zoom_level" and out.get("zoom_level", 14) == 14:
+            out[k] = v
+        elif k == "enable_reviews" and not out.get("enable_reviews"):
+            out[k] = v
+    return out
+
+
+def _expand_geo_grid(data: dict) -> list[dict] | None:
+    """Return per-cell sub-tasks if geo_polygon or grid_bbox is set, else None.
+
+    Each sub-task gets `coordinates` (cell center) and a `zoom_level` matched
+    to the cell size. The original `query` is reused unchanged.
+    """
+    from backend.geo import bbox_to_grid, polygon_to_grid, cell_side_to_zoom
+
+    polygon = data.get("geo_polygon")
+    bbox = data.get("grid_bbox")
+    if not polygon and not bbox:
+        return None
+
+    cell_km = float(data.get("grid_cell_km") or 5.0)
+    if polygon:
+        cells = polygon_to_grid(polygon, cell_km)
+    else:
+        if len(bbox) != 4:
+            raise ValueError("grid_bbox must be [min_lat, min_lon, max_lat, max_lon]")
+        cells = bbox_to_grid(bbox[0], bbox[1], bbox[2], bbox[3], cell_km)
+
+    if not cells:
+        return []
+
+    base_query = data.get("query") or (
+        f"{data['business_type']}" if data.get("business_type") else ""
+    )
+    if not base_query:
+        raise ValueError("grid scrape requires a `query` or `business_type`")
+
+    zoom = cell_side_to_zoom(cell_km)
+    data_copy = {k: v for k, v in data.items() if k not in ("queries", "geo_polygon", "grid_bbox")}
+    return [
+        {
+            **data_copy,
+            "query": _clean_query(base_query),
+            "coordinates": f"{lat},{lon}",
+            "zoom_level": zoom,
+        }
+        for lat, lon in cells
+    ]
+
+
 def split_task_by_query(data):
     """Split a task into sub-tasks based on queries or country + business_type."""
+    data = _apply_strategy(data)
+
+    grid_tasks = _expand_geo_grid(data)
+    if grid_tasks is not None:
+        return grid_tasks
+
     if data.get("country"):
         # If a state is given (US only for now), use state cities instead
         if data.get("state") and data["country"] == "US":
@@ -466,12 +519,44 @@ class ScrapeRequest(BaseModel):
     skip_closed: bool = False
     category_in: list[str] | None = None
     price_range: str | list[str] | None = None
+    # Per-job output targets (appended to mapo.yaml outputs.targets).
+    # Each target is a dict with a 'type' (csv/json/postgres/sheets/s3) and
+    # type-specific keys. String values may use {job_id}/{timestamp}/{query}.
+    output_targets: list[dict] = []
+    # Geographic strategies (alternatives to coordinates+zoom or country+state)
+    geo_polygon: list[list[float]] | None = None  # [[lat,lon], ...] outer ring
+    grid_bbox: list[float] | None = None          # [min_lat, min_lon, max_lat, max_lon]
+    grid_cell_km: float = 5.0                      # cell side length in km for grid scrapes
+    # Speed-vs-coverage preset; expanded server-side into the underlying knobs
+    strategy: str = ""  # "" | fast | fastest | detailed | zoom
 
 
 class EnrichRequest(BaseModel):
     websites: list[str]
     provider: str = "rapidapi"
     api_key: str = ""
+
+
+class JobsScrapeRequest(BaseModel):
+    """Request schema for /api/v1/scrape_jobs (JobSpy-backed)."""
+    search_term: str = ""
+    location: str = ""
+    sites: list[str] = []                  # subset of indeed/linkedin/glassdoor/google/zip_recruiter/bayt/naukri
+    results_wanted: int = 20
+    hours_old: int | None = None           # only postings newer than N hours
+    distance: int | None = None            # miles from location
+    job_type: str = ""                     # fulltime|parttime|contract|internship
+    is_remote: bool = False
+    country_indeed: str = "USA"            # Indeed/Glassdoor regional code
+    linkedin_fetch_description: bool = False
+    description_format: str = "markdown"   # or "html"
+    # Shared with places mode
+    webhook_url: str = ""
+    webhook_headers: dict = {}
+    error_webhook_url: str = ""
+    output_targets: list[dict] = []
+    max_retries: int = 1
+    retry_delay: int = 30
 
 
 # ---------------------------------------------------------------------------
@@ -513,6 +598,58 @@ def _auto_export(job_id: str, results: list[dict]):
             json.dump(results, f, indent=2, ensure_ascii=False)
     except Exception as e:
         print(f"[Mapo] Auto-export JSON failed: {e}")
+
+
+def _interpolate_target_strings(target: dict, job_id: str, query: str) -> dict:
+    """Substitute {job_id}, {timestamp}, {query} placeholders in string values.
+
+    Lets users write `path: "./data/{query}_{timestamp}.csv"` in mapo.yaml
+    and get unique files per run instead of every job overwriting the same path.
+    """
+    import datetime as _dt
+    safe_query = re.sub(r"[^a-zA-Z0-9_-]+", "_", (query or "")[:60]).strip("_") or "scrape"
+    timestamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = {}
+    for k, v in target.items():
+        if isinstance(v, str):
+            out[k] = v.format(job_id=job_id, timestamp=timestamp, query=safe_query)
+        else:
+            out[k] = v
+    return out
+
+
+async def _write_to_targets(job_id: str, results: list[dict], params: dict):
+    """Dispatch results to every target configured in mapo.yaml `outputs.targets`.
+
+    Per-job overrides come from `params["output_targets"]` (list of dicts) and
+    are appended to the global list. Each writer runs in a thread (blocking I/O)
+    and failures are isolated so one broken target can't take down the others.
+    """
+    from backend.outputs import get_writer
+
+    global_targets = list(config.outputs.targets or [])
+    job_targets = list(params.get("output_targets") or [])
+    targets = global_targets + job_targets
+    if not targets:
+        return
+
+    query = params.get("query", "")
+    metadata = {
+        "job_id": job_id,
+        "query": query,
+        "timestamp": time.time(),
+        "row_count": len(results),
+    }
+
+    for target in targets:
+        target_type = (target.get("type") or "?").lower()
+        try:
+            resolved = _interpolate_target_strings(target, job_id, query)
+            writer = get_writer(resolved)
+            await asyncio.to_thread(writer.write, results, metadata)
+            print(f"[Mapo] Output target '{target_type}' wrote {len(results)} rows")
+        except Exception as e:
+            print(f"[Mapo] Output target '{target_type}' failed: {e}")
 
 
 def _fire_webhook(job_id: str, event_type: str, result_count: int,
@@ -838,6 +975,9 @@ async def _run_pipeline_attempt(job_id: str, params: dict,
         # Auto-export CSV to data/exports/
         _auto_export(job_id, results)
 
+        # Dispatch to configured output targets (postgres, sheets, s3, csv, json)
+        await _write_to_targets(job_id, results, params)
+
         # Fire webhook if configured
         _fire_webhook(job_id, "task.completed", len(results), results=results)
 
@@ -898,6 +1038,7 @@ async def _run_pipeline_attempt(job_id: str, params: dict,
             # Auto-export whatever we got before failure
             if job.get("results"):
                 _auto_export(job_id, job["results"])
+                await _write_to_targets(job_id, job["results"], params)
             await _broadcast(job_id, {"type": "error", "error": str(exc)})
             return True  # done (failed), don't retry
         else:
@@ -906,6 +1047,89 @@ async def _run_pipeline_attempt(job_id: str, params: dict,
             job["updated_at"] = time.time()
             _save_job(job_id)
             return False  # signal retry
+
+
+async def run_jobs_pipeline(job_id: str, params: dict):
+    """Execute the JobSpy-backed jobs scraping pipeline.
+
+    Reuses the same job store, output targets, webhooks, and SSE broadcast
+    plumbing as ``run_pipeline``. Skips enrichment/reviews/AI which are
+    place-shaped and don't apply to job listings.
+    """
+    from backend.scrapers.jobs import scrape_jobs_async
+
+    max_retries = params.get("max_retries", 1)
+    retry_delay = params.get("retry_delay", 30)
+
+    job = _jobs[job_id]
+    progress = JobProgress()
+    job["progress"] = progress
+
+    for attempt in range(max_retries + 1):
+        job["status"] = "running"
+        job["updated_at"] = time.time()
+        _save_job(job_id)
+
+        try:
+            sites = params.get("sites") or []
+            await _broadcast(job_id, {
+                "type": "progress",
+                "message": f"Scraping {len(sites) or 'all'} job sites...",
+                **progress.to_dict(),
+            })
+
+            results = await scrape_jobs_async(params)
+
+            progress.places_scraped = len(results)
+            progress.total_places_found = len(results)
+            progress.completed_queries = 1
+            progress.total_queries = 1
+
+            job["results"] = results
+            job["status"] = "completed"
+            job["updated_at"] = time.time()
+            _save_job(job_id)
+
+            _auto_export(job_id, results)
+            await _write_to_targets(job_id, results, params)
+            _fire_webhook(job_id, "task.completed", len(results), results=results)
+            await _broadcast(job_id, {
+                "type": "completed",
+                "total_results": len(results),
+                **progress.to_dict(),
+            })
+            return
+
+        except asyncio.CancelledError:
+            job["status"] = "cancelled"
+            job["updated_at"] = time.time()
+            _save_job(job_id)
+            await _broadcast(job_id, {"type": "cancelled"})
+            return
+
+        except Exception as exc:
+            is_last = attempt >= max_retries
+            print(f"[Mapo] Jobs pipeline attempt {attempt + 1}/{max_retries + 1} failed: {exc}")
+            if is_last:
+                job["status"] = "failed"
+                job["error"] = str(exc)
+                job["updated_at"] = time.time()
+                _save_job(job_id)
+                _fire_webhook(job_id, "task.failed", len(job.get("results", [])))
+                await _broadcast(job_id, {"type": "error", "error": str(exc)})
+                return
+            wait = retry_delay * (attempt + 1)
+            job["status"] = "retrying"
+            job["error"] = f"Attempt {attempt + 1} failed, retrying in {wait}s..."
+            job["updated_at"] = time.time()
+            _save_job(job_id)
+            await _broadcast(job_id, {
+                "type": "retrying",
+                "attempt": attempt + 1,
+                "max_retries": max_retries,
+                "retry_in": wait,
+            })
+            await asyncio.sleep(wait)
 
 
 # ---------------------------------------------------------------------------
@@ -1082,11 +1306,64 @@ async def start_scrape(req: ScrapeRequest):
     }
     _save_job(job_id)
 
-    task = asyncio.create_task(run_pipeline(job_id, req.model_dump()))
+    task = _enqueue_or_run(job_id, req.model_dump())
     _jobs[job_id]["_task"] = task
 
-    # Schedule auto-cancel after max_runtime_minutes
-    asyncio.create_task(_runtime_watcher(job_id, limits.max_runtime_minutes))
+    # Schedule auto-cancel after max_runtime_minutes (only meaningful for in-proc jobs)
+    if task is not None:
+        asyncio.create_task(_runtime_watcher(job_id, limits.max_runtime_minutes))
+
+    return {"job_id": job_id, "status": "created"}
+
+
+@app.post("/api/v1/scrape_jobs")
+async def start_scrape_jobs(req: JobsScrapeRequest):
+    """Submit a job-listings scrape (LinkedIn/Indeed/Glassdoor/Google/ZipRecruiter)."""
+    if not req.search_term and not req.location:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "Either 'search_term' or 'location' is required."},
+        )
+
+    limits = config.limits
+    if req.results_wanted > limits.max_results_per_query:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": f"results_wanted ({req.results_wanted}) exceeds limit of {limits.max_results_per_query}. Adjust in Settings."},
+        )
+
+    running = sum(1 for j in _jobs.values() if j.get("status") in ("running", "retrying", "created"))
+    if running >= limits.max_concurrent_jobs:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"Too many concurrent jobs ({running}/{limits.max_concurrent_jobs}). Wait for one to finish."},
+        )
+
+    params = req.model_dump()
+    params["mode"] = "jobs"
+    # Provide a query-ish label for downstream filename interpolation + UI lists
+    params["query"] = (req.search_term or req.location or "jobs").strip()
+
+    job_id = str(uuid.uuid4())
+    now = time.time()
+    _jobs[job_id] = {
+        "job_id": job_id,
+        "status": "created",
+        "params": params,
+        "results": [],
+        "error": None,
+        "created_at": now,
+        "updated_at": now,
+        "progress": None,
+        "_task": None,
+    }
+    _save_job(job_id)
+
+    task = _enqueue_or_run(job_id, params)
+    _jobs[job_id]["_task"] = task
+
+    if task is not None:
+        asyncio.create_task(_runtime_watcher(job_id, limits.max_runtime_minutes))
 
     return {"job_id": job_id, "status": "created"}
 
@@ -1472,7 +1749,7 @@ async def run_schedule_now(schedule_id: str):
         "_task": None,
     }
     _save_job(job_id)
-    task = asyncio.create_task(run_pipeline(job_id, params))
+    task = _enqueue_or_run(job_id, params)
     _jobs[job_id]["_task"] = task
     return {"job_id": job_id, "schedule_id": schedule_id}
 

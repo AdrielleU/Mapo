@@ -8,13 +8,19 @@ from typing import Any
 from backend.outputs.base import OutputWriter
 
 
+DEDUP_KEY_CANDIDATES = ("place_id", "job_url", "id")
+
+
 class PostgresWriter(OutputWriter):
-    """Write rows to a PostgreSQL table, upserting by ``place_id``.
+    """Write rows to a PostgreSQL table, upserting on a dedup key.
 
     Config keys:
 
     * ``connection`` — a libpq connection string (required).
     * ``table`` — target table name (required).
+    * ``dedup_key`` — column to upsert on. If omitted, the writer picks
+      the first of ``place_id``, ``job_url``, ``id`` that exists in the
+      data; if none exist, rows are inserted without dedup.
 
     Requires the ``psycopg2`` package at runtime.
     """
@@ -35,6 +41,12 @@ class PostgresWriter(OutputWriter):
         columns = list(data[0].keys())
         _validate_identifiers(table, columns)
 
+        dedup_key = self.config.get("dedup_key")
+        if dedup_key and dedup_key not in columns:
+            dedup_key = None
+        if not dedup_key:
+            dedup_key = next((k for k in DEDUP_KEY_CANDIDATES if k in columns), None)
+
         conn = psycopg2.connect(connection_str)
         try:
             with conn.cursor() as cur:
@@ -43,8 +55,8 @@ class PostgresWriter(OutputWriter):
                 create_sql = (
                     f'CREATE TABLE IF NOT EXISTS "{table}" ({col_defs}'
                 )
-                if "place_id" in columns:
-                    create_sql += f', UNIQUE ("place_id")'
+                if dedup_key:
+                    create_sql += f', UNIQUE ("{dedup_key}")'
                 create_sql += ")"
                 cur.execute(create_sql)
 
@@ -53,11 +65,11 @@ class PostgresWriter(OutputWriter):
                 placeholders = ", ".join(["%s"] * len(columns))
                 insert_sql = f'INSERT INTO "{table}" ({col_names}) VALUES ({placeholders})'
 
-                if "place_id" in columns:
+                if dedup_key:
                     update_set = ", ".join(
-                        f'"{c}" = EXCLUDED."{c}"' for c in columns if c != "place_id"
+                        f'"{c}" = EXCLUDED."{c}"' for c in columns if c != dedup_key
                     )
-                    insert_sql += f' ON CONFLICT ("place_id") DO UPDATE SET {update_set}'
+                    insert_sql += f' ON CONFLICT ("{dedup_key}") DO UPDATE SET {update_set}'
 
                 for row in data:
                     values = [_serialize_value(row.get(c)) for c in columns]

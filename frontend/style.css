@@ -419,3 +419,145 @@ tbody td a:hover { text-decoration: underline; }
 
 /* --- Focus visible fallback for older browsers --- */
 :focus:not(:focus-visible) { outline: none; box-shadow: none; }
+
+/* ================================================================
+   HERO CARD — primary entry point on the Input tab.
+   Big query textarea, inline Max Results + Strategy + Run button,
+   and a "More options" toggle that expands the rest of the form.
+   ================================================================ */
+.hero-card {
+  border: 1px solid var(--accent-soft, var(--border));
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent) 6%, var(--bg-card)) 0%,
+    var(--bg-card) 60%);
+}
+.hero-row textarea {
+  width: 100%;
+  font-size: 1.05rem;
+  padding: 0.85rem 1rem;
+  resize: vertical;
+  min-height: 5rem;
+  font-family: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+.hero-row textarea:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: var(--accent);
+}
+.hero-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+.hero-input-mini { display: flex; flex-direction: column; gap: 0.25rem; min-width: 7.5rem; }
+.hero-input-mini label { font-size: 0.8125rem; color: var(--text-dim); margin: 0; }
+.hero-input-mini input,
+.hero-input-mini select {
+  padding: 0.5rem 0.65rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+.hero-actions { display: flex; align-items: center; gap: 0.5rem; margin-left: auto; }
+.btn-lg {
+  padding: 0.65rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.btn-link {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.875rem;
+  border-radius: var(--radius);
+}
+.btn-link:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* ================================================================
+   ADVANCED OPTIONS — collapsed by default; toggled by "More options".
+   ================================================================ */
+.advanced-collapsed { display: none; }
+
+/* ================================================================
+   FORM ↔ JSON VIEW TOGGLE
+   ================================================================ */
+.view-toggle {
+  display: inline-flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.15rem;
+  margin-bottom: 0.6rem;
+  gap: 0.15rem;
+}
+.vt-btn {
+  background: transparent;
+  border: 0;
+  padding: 0.3rem 0.85rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: calc(var(--radius) - 2px);
+}
+.vt-btn:hover { color: var(--text); }
+.vt-btn.active {
+  background: var(--accent);
+  color: var(--bg-card);
+  font-weight: 600;
+}
+
+#hero-json-view textarea {
+  width: 100%;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  padding: 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  resize: vertical;
+}
+#hero-json-view textarea:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--accent); }
+
+/* When the form is in JSON mode, hide every form-only element. */
+.mode-json .json-mode-hide { display: none !important; }
+
+/* "Find" mode toggle: Businesses (places) vs Jobs */
+.find-jobs .places-only { display: none !important; }
+.find-places .jobs-only { display: none !important; }
+
+/* ================================================================
+   RUN VIEW — two-pane grid: form left, jobs/progress right.
+   Stacks vertically on narrow screens.
+   ================================================================ */
+.run-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+.run-pane-left { min-width: 0; }
+.run-pane-right {
+  position: sticky;
+  top: 1rem;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+@media (max-width: 1023px) {
+  .run-grid { grid-template-columns: 1fr; gap: 0.75rem; }
+  .run-pane-right { position: static; max-height: none; overflow: visible; }
+}

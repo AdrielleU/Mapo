@@ -63,6 +63,16 @@
 #     SEO optimization, and Google Ads management.
 #     Starting at $1,500 + $40/month hosting.
 
+# --- Jobs (JobSpy-backed) ---
+# Optional defaults applied to /api/v1/scrape_jobs when the request omits them.
+# Sites supported: indeed, linkedin, glassdoor, google, zip_recruiter, bayt, naukri
+# jobs:
+#   default_sites: ["indeed", "linkedin", "google", "zip_recruiter"]
+#   country_indeed: "USA"           # Indeed/Glassdoor regional code
+#   hours_old: 168                   # only postings newer than N hours (168 = 7d)
+#   description_format: markdown    # markdown | html
+#   linkedin_fetch_description: false  # follow each LinkedIn URL for full body (slow)
+
 # --- Webhooks ---
 # webhooks:
 #   enabled: false
@@ -92,10 +102,15 @@
 #       output_target: postgres
 
 # --- Output Targets ---
+# Every successful job writes its results to all configured targets in order.
+# String values may use {job_id}, {timestamp} (YYYYMMDD_HHMMSS), and {query}
+# placeholders for unique paths/keys per run. A failure in one target does not
+# affect the others or the rest of the pipeline.
+#
 # outputs:
 #   targets:
 #     - type: csv
-#       path: "./data/results.csv"
+#       path: "./data/results_{query}_{timestamp}.csv"
 #
 #     - type: json
 #       path: "./data/results.json"
@@ -111,5 +126,6 @@
 #
 #     - type: s3
 #       bucket: "my-mapo-bucket"
-#       key_prefix: "scrapes/"
+#       key_prefix: "scrapes/{job_id}/"
 #       region: "us-east-1"
+#       format: json

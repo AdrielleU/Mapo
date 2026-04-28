@@ -160,8 +160,37 @@ GET_LINKS_JS = """
 """
 
 
+_BLOCK_MARKERS = ("/sorry/", "captcha", "unusual traffic")
+
+
+def _looks_blocked(resp) -> bool:
+    """True if Google is throttling us (429, /sorry/ redirect, or CAPTCHA HTML)."""
+    if resp.status_code in (429, 403):
+        return True
+    final_url = str(resp.url).lower()
+    if any(m in final_url for m in _BLOCK_MARKERS):
+        return True
+    # Cheap text sniff — only on the first KB to keep this fast.
+    snippet = resp.text[:1024].lower() if resp.content else ""
+    return "captcha" in snippet or "unusual traffic from your computer" in snippet
+
+
+def _backoff_seconds(attempt: int, blocked: bool) -> float:
+    """Exponential backoff with jitter; longer floor when we think we're blocked."""
+    base = (2 ** attempt) + random.uniform(0, 1)
+    if blocked:
+        base = max(base, 8.0 * (attempt + 1))  # 8, 16, 24, 32, 40s on blocks
+    return min(base, 90.0)
+
+
 async def scrape_place(link, cookies, user_agent, proxy=None):
-    """Fetch a single place page via async HTTP and extract structured data."""
+    """Fetch a single place page via async HTTP and extract structured data.
+
+    Retry behavior: 5 attempts with exponential backoff + jitter. If Google
+    looks like it's blocking (429/403, /sorry/ redirect, CAPTCHA markers) we
+    rotate to a fresh proxy on each retry so a single bad IP can't poison the
+    rest of the job.
+    """
     # Check cache first
     cached = cache.get(link)
     if cached:
@@ -169,25 +198,33 @@ async def scrape_place(link, cookies, user_agent, proxy=None):
 
     proxy_url = proxy or (proxy_manager.get_proxy() if proxy_manager.enabled else None)
 
-    async with httpx.AsyncClient(
-        http2=True,
-        proxy=proxy_url,
-        timeout=15.0,
-        follow_redirects=True,
-    ) as client:
-        headers = {
-            "User-Agent": user_agent or get_random_ua(),
-            "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-        cookie_dict = {}
-        if cookies:
-            for c in cookies:
-                cookie_dict[c["name"]] = c["value"]
+    headers = {
+        "User-Agent": user_agent or get_random_ua(),
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    cookie_dict = {c["name"]: c["value"] for c in (cookies or [])}
 
-        for attempt in range(5):
-            try:
+    for attempt in range(5):
+        try:
+            async with httpx.AsyncClient(
+                http2=True,
+                proxy=proxy_url,
+                timeout=15.0,
+                follow_redirects=True,
+            ) as client:
                 resp = await client.get(link, headers=headers, cookies=cookie_dict)
+
+                if _looks_blocked(resp):
+                    # Rotate proxy on the next attempt if we have a pool
+                    if proxy is None and proxy_manager.enabled:
+                        proxy_url = proxy_manager.get_proxy()
+                    if attempt < 4:
+                        await asyncio.sleep(_backoff_seconds(attempt, blocked=True))
+                        continue
+                    print(f"[Mapo] Skipping place (Google block, no recovery): {link[:80]}")
+                    return None
+
                 page_html = resp.text
                 data = None
 
@@ -226,20 +263,23 @@ async def scrape_place(link, cookies, user_agent, proxy=None):
                     cache.put(link, data)
                     return data
 
-                # No strategy worked on this attempt
+                # Parse failed but no block — back off and try again
                 if attempt < 4:
-                    await asyncio.sleep(2 * (attempt + 1))
+                    await asyncio.sleep(_backoff_seconds(attempt, blocked=False))
                     continue
 
                 print(f"[Mapo] Skipping place (no data after 5 attempts): {link[:80]}")
                 return None
 
-            except Exception:
-                if attempt < 4:
-                    await asyncio.sleep(2 * (attempt + 1))
-                    continue
-                traceback.print_exc()
-                return None
+        except Exception:
+            if attempt < 4:
+                # On transient network error, also rotate proxy if we can
+                if proxy is None and proxy_manager.enabled:
+                    proxy_url = proxy_manager.get_proxy()
+                await asyncio.sleep(_backoff_seconds(attempt, blocked=False))
+                continue
+            traceback.print_exc()
+            return None
 
 
 def _extract_minimal_from_init_state(page_html, link):
