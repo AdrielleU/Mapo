@@ -379,12 +379,12 @@ OUTPUT_FIELDS = [
     "detailed_address", "coordinates", "plus_code", "time_zone",
     "link", "reviews_link",
     # Ownership & signals
-    "owner", "owner_link", "can_claim",
+    "owner_name", "owner_profile_link", "can_claim",
     "is_spending_on_ads", "is_temporarily_closed", "is_permanently_closed",
     # Social / enrichment
 ] + SOCIAL_MEDIA_KEYS + [
     # Business details
-    "hours", "closed_on", "service_options", "about",
+    "workday_timing", "closed_on", "service_options", "about",
     "menu", "reservations", "order_online_links",
     # Reviews intelligence
     "reviews_per_rating", "review_keywords", "owner_response_rate",
@@ -441,12 +441,12 @@ EXPORT_PRESETS = {
         # Comprehensive payload for n8n/Make/Zapier workflows
         "place_id", "name", "main_category", "categories", "rating", "reviews",
         "phone", "website", "address", "detailed_address", "coordinates",
-        "owner", "is_spending_on_ads", "can_claim", "best_email",
+        "owner_name", "is_spending_on_ads", "can_claim", "best_email",
     ],
     "leads": [
         # Sales-focused: contact info + signals
         "name", "phone", "website", "address", "rating", "reviews",
-        "main_category", "owner", "is_spending_on_ads", "can_claim",
+        "main_category", "owner_name", "is_spending_on_ads", "can_claim",
         "best_email", "best_email_score",
     ],
     "geo": [

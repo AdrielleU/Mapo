@@ -21,6 +21,36 @@ def safe_get(data, *keys):
     return data
 
 
+_US_STATES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY", "DC", "PR",
+}
+
+# US ZIP+state pattern: ", NY 10471" or ", CA 90210-1234"
+_US_STATE_ZIP_RE = re.compile(r",\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\b")
+
+
+def _fill_address_from_string(complete_address: dict, address: str | None) -> None:
+    """Backfill missing state/postal_code from the formatted address string.
+
+    Google's structured address slot is sometimes empty even when the
+    formatted `address` contains the data. Mutates *complete_address* in place.
+    """
+    if not address:
+        return
+    if complete_address.get("state") and complete_address.get("postal_code"):
+        return
+    match = _US_STATE_ZIP_RE.search(address)
+    if match and match.group(1) in _US_STATES:
+        if not complete_address.get("state"):
+            complete_address["state"] = match.group(1)
+        if not complete_address.get("postal_code"):
+            complete_address["postal_code"] = match.group(2)
+
+
 def parse_app_state(data):
     """Parse place data from either the preview endpoint or APP_INITIALIZATION_STATE.
 
@@ -238,6 +268,7 @@ def extract_data(input_str, link):
     data = parse_app_state(input_str)
 
     place_id = safe_get(data, 6, 78)
+    address_str = safe_get(data, 6, 39) or safe_get(data, 6, 37, 0, 0, 17, 0)
     complete_address = {
         "ward": safe_get(data, 6, 183, 1, 0),
         "street": safe_get(data, 6, 183, 1, 1),
@@ -246,6 +277,7 @@ def extract_data(input_str, link):
         "state": safe_get(data, 6, 183, 1, 5),
         "country_code": safe_get(data, 6, 183, 1, 6),
     }
+    _fill_address_from_string(complete_address, address_str)
 
     reviews_link = clean_link(safe_get(data, 6, 4, 3, 0))
     if reviews_link is None:
@@ -380,7 +412,7 @@ def extract_data(input_str, link):
         "phone_international": phone_international,
         "main_category": safe_get(data, 6, 13, 0),
         "categories": safe_get(data, 6, 13),
-        "address": safe_get(data, 6, 39) or safe_get(data, 6, 37, 0, 0, 17, 0),
+        "address": address_str,
         "detailed_address": complete_address,
         "coordinates": coordinates,
         "plus_code": plus_code,
@@ -389,15 +421,15 @@ def extract_data(input_str, link):
         "link": link,
         "reviews_link": reviews_link,
         # Ownership & status
-        "owner": owner_name,
-        "owner_link": owner_link,
+        "owner_name": owner_name,
+        "owner_profile_link": owner_link,
         "can_claim": can_claim,
         "status": status,
         "is_temporarily_closed": is_temporarily_closed,
         "is_permanently_closed": is_permanently_closed,
         # Business details
         "price_range": price_range,
-        "hours": hours,
+        "workday_timing": hours,
         "closed_on": closed_on,
         "service_options": service_options,
         "about": about,

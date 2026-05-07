@@ -207,8 +207,8 @@ def rank_emails_with_ai(
         parts.append(f"Address: {place['address']}")
     if place.get("website"):
         parts.append(f"Website: {place['website']}")
-    if place.get("owner"):
-        parts.append(f"Owner: {place['owner']}")
+    if place.get("owner_name"):
+        parts.append(f"Owner: {place['owner_name']}")
 
     parts.append("\nEmails to rank:")
     for i, e in enumerate(valid_emails, 1):
